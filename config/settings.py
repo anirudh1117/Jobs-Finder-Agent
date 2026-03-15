@@ -28,8 +28,18 @@ SECRET_KEY = 'django-insecure-&begkiw9ogeb-uld+vpo6)sch^4^kcx37-7k$d4_nfgmm2=w7y
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ['https://jobs-finder-agent-production.up.railway.app', 'jobs-finder-agent-production.up.railway.app', 'localhost']
+ALLOWED_HOSTS = ['https://jobs-finder-agent-production.up.railway.app', 'jobs-finder-agent-production.up.railway.app', 'localhost', '127.0.0.1']
 
+CSRF_TRUSTED_ORIGINS = ['https://jobs-finder-agent-production.up.railway.app', 'http://localhost', 'http://127.0.0.1']
+
+# CSRF & Session Security Settings (critical for production)
+CSRF_COOKIE_SECURE = False  # Set to True when using HTTPS in production
+CSRF_COOKIE_HTTPONLY = False  # Must be False for CSRF to work with forms
+CSRF_COOKIE_SAMESITE = 'Lax'  # Protect against CSRF while remaining user-friendly
+
+SESSION_COOKIE_SECURE = False  # Set to True when using HTTPS in production
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
 
 # Application definition
 
