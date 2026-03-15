@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Freelance Agent Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand fw-semibold" href="/dashboard">Freelance Agent</a>
+        <div class="d-flex align-items-center gap-3 text-white">
+            <div class="navbar-nav flex-row gap-2">
+                <a class="nav-link" href="/jobs">Jobs</a>
+                <a class="nav-link" href="/applications">Applications</a>
+                <a class="nav-link" href="/upload-resume">Upload Resume</a>
+            </div>
+            <span class="small text-white-50">{{ request.user.username }}</span>
+            <form method="post" action="/logout/" class="m-0">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-light btn-sm">Logout</button>
+            </form>
+        </div>
+    </div>
+</nav>
+
+<div class="container py-4">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h3 mb-1">Dashboard</h1>
+            <p class="text-muted mb-0">Monitor jobs, applications, and automation activity.</p>
+        </div>
+        <a class="btn btn-primary" href="/upload-resume">Upload Resume</a>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <p class="text-muted small text-uppercase mb-2">Total Jobs</p>
+                    <h2 class="display-6 mb-0">{{ total_jobs }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <p class="text-muted small text-uppercase mb-2">Applications Sent</p>
+                    <h2 class="display-6 mb-0">{{ total_applications }}</h2>
+                    <small class="text-muted">Jobs applied: {{ jobs_applied }}</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <p class="text-muted small text-uppercase mb-2">Manual Apply Jobs</p>
+                    <h2 class="display-6 mb-0">{{ manual_apply_jobs }}</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white border-0 pt-4 pb-0">
+            <h2 class="h5 mb-0">Recent Jobs</h2>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Platform</th>
+                            <th>Budget</th>
+                            <th>Score</th>
+                            <th>Created</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for job in recent_jobs %}
+                            <tr>
+                                <td>
+                                    <div class="fw-semibold">{{ job.title }}</div>
+                                    <div class="small text-muted text-truncate" style="max-width: 380px;">{{ job.description }}</div>
+                                </td>
+                                <td><span class="badge bg-secondary-subtle text-dark">{{ job.platform|upper }}</span></td>
+                                <td>
+                                    {% if job.budget %}
+                                        ${{ job.budget }}
+                                    {% elif job.hourly_rate %}
+                                        ${{ job.hourly_rate }}/hr
+                                    {% else %}
+                                        N/A
+                                    {% endif %}
+                                </td>
+                                <td>{{ job.score|floatformat:2 }}</td>
+                                <td>{{ job.created_at|date:"Y-m-d H:i" }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted py-4">No jobs available yet.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

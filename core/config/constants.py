@@ -1,0 +1,26 @@
+"""Centralized global constants for the Freelance Agent system.
+
+This module stores stable, non-secret constants that are shared across
+multiple modules. These values represent system-wide defaults and labels that
+should remain independent from environment-specific runtime configuration.
+"""
+
+UPWORK: str = "upwork"
+MERCOR: str = "mercor"
+OUTLIER: str = "outlier"
+REMOTEOK: str = "remoteok"
+LINKEDIN: str = "linkedin"
+
+CATEGORY_SOFTWARE_DEV: str = "software_development"
+CATEGORY_AI_TRAINING: str = "ai_training"
+CATEGORY_OTHER: str = "other"
+
+MIN_AI_TRAINING_RATE: int = 20
+MIN_FIXED_BUDGET: int = 100
+
+JOB_FETCH_INTERVAL_HOURS: int = 1
+MAX_APPLICATIONS_PER_DAY: int = 10
+
+DEFAULT_USER_ID: int = 1
+
+DEFAULT_PROPOSAL_LENGTH: int = 1200

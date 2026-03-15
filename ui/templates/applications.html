@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Freelance Agent Applications</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand fw-semibold" href="/dashboard">Freelance Agent</a>
+        <div class="d-flex align-items-center gap-3 text-white">
+            <div class="navbar-nav flex-row gap-2">
+                <a class="nav-link" href="/jobs">Jobs</a>
+                <a class="nav-link active" href="/applications">Applications</a>
+                <a class="nav-link" href="/upload-resume">Upload Resume</a>
+            </div>
+            <span class="small text-white-50">{{ request.user.username }}</span>
+            <form method="post" action="/logout/" class="m-0">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-light btn-sm">Logout</button>
+            </form>
+        </div>
+    </div>
+</nav>
+
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h3 mb-1">Applications</h1>
+            <p class="text-muted mb-0">Track the proposal text and lifecycle of submitted applications.</p>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Job Title</th>
+                            <th>Platform</th>
+                            <th>Proposal Preview</th>
+                            <th>Status</th>
+                            <th>Applied Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for application in applications %}
+                            <tr>
+                                <td class="fw-semibold">{{ application.job.title }}</td>
+                                <td><span class="badge bg-secondary-subtle text-dark">{{ application.job.platform|upper }}</span></td>
+                                <td>{{ application.proposal_text|truncatechars:100 }}</td>
+                                <td>
+                                    {% if application.status == 'INTERVIEW' %}
+                                        <span class="badge text-bg-primary">{{ application.status }}</span>
+                                    {% elif application.status == 'REJECTED' %}
+                                        <span class="badge text-bg-danger">{{ application.status }}</span>
+                                    {% elif application.status == 'REPLIED' %}
+                                        <span class="badge text-bg-info">{{ application.status }}</span>
+                                    {% elif application.status == 'VIEWED' %}
+                                        <span class="badge text-bg-warning">{{ application.status }}</span>
+                                    {% else %}
+                                        <span class="badge text-bg-success">{{ application.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ application.applied_at|date:"Y-m-d H:i" }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted py-4">No applications have been recorded yet.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

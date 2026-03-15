@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Freelance Agent Jobs</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand fw-semibold" href="/dashboard">Freelance Agent</a>
+        <div class="d-flex align-items-center gap-3 text-white">
+            <div class="navbar-nav flex-row gap-2">
+                <a class="nav-link active" href="/jobs">Jobs</a>
+                <a class="nav-link" href="/applications">Applications</a>
+                <a class="nav-link" href="/upload-resume">Upload Resume</a>
+            </div>
+            <span class="small text-white-50">{{ request.user.username }}</span>
+            <form method="post" action="/logout/" class="m-0">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-light btn-sm">Logout</button>
+            </form>
+        </div>
+    </div>
+</nav>
+
+<div class="container py-4">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h3 mb-1">Jobs</h1>
+            <p class="text-muted mb-0">Browse fetched opportunities and current application status.</p>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <form class="row g-3" method="get">
+                <div class="col-md-4">
+                    <label class="form-label">Platform</label>
+                    <input type="text" class="form-control" name="platform" value="{{ active_platform }}" placeholder="upwork, remoteok, linkedin">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Minimum Score</label>
+                    <input type="text" class="form-control" name="score" value="{{ active_score }}" placeholder="5">
+                </div>
+                <div class="col-md-4 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary">Apply Filters</button>
+                    <a href="/jobs" class="btn btn-outline-secondary">Reset</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Platform</th>
+                            <th>Budget</th>
+                            <th>Score</th>
+                            <th>Status</th>
+                            <th>Link</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in job_rows %}
+                            <tr>
+                                <td>
+                                    <div class="fw-semibold">{{ row.job.title }}</div>
+                                    <div class="small text-muted text-truncate" style="max-width: 360px;">{{ row.job.description }}</div>
+                                </td>
+                                <td><span class="badge bg-secondary-subtle text-dark">{{ row.job.platform|upper }}</span></td>
+                                <td>
+                                    {% if row.job.budget %}
+                                        ${{ row.job.budget }}
+                                    {% elif row.job.hourly_rate %}
+                                        ${{ row.job.hourly_rate }}/hr
+                                    {% else %}
+                                        N/A
+                                    {% endif %}
+                                </td>
+                                <td>{{ row.job.score|floatformat:2 }}</td>
+                                <td>
+                                    {% if row.status == 'AUTO APPLIED' %}
+                                        <span class="badge text-bg-success">AUTO APPLIED</span>
+                                    {% elif row.status == 'MANUAL APPLY' %}
+                                        <span class="badge text-bg-warning">MANUAL APPLY</span>
+                                    {% else %}
+                                        <span class="badge text-bg-secondary">NOT APPLIED</span>
+                                    {% endif %}
+                                </td>
+                                <td><a href="{{ row.job.job_url }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary">Open</a></td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="6" class="text-center text-muted py-4">No jobs match the current filters.</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
