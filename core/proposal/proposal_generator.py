@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import traceback
 from typing import Any
 
 import openai
 
 from core.config.constants import DEFAULT_PROPOSAL_LENGTH
 from core.config.settings import OPENAI_API_KEY, OPENAI_MODEL_NAME
+from core.logging.system_logger import log_event
 from core.proposal.proposal_optimizer import ProposalOptimizer
 
 _STYLE_ANCHOR_EXAMPLE = """Hi,
@@ -62,10 +64,50 @@ class ProposalGenerator:
 
         prompt = self._build_prompt(user_context=user_context, job_context=job_context)
 
-        response = self._client.chat.completions.create(
-            model=OPENAI_MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.35,
+        payload = {
+            "model": OPENAI_MODEL_NAME,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.35,
+        }
+        platform = str(job_context.get("platform", "")).strip() or None
+        job_url = str(job_context.get("job_url", "")).strip() or None
+        log_event(
+            level="INFO",
+            module="openai",
+            action="openai_request",
+            message="Sending proposal generation request",
+            status="SUCCESS",
+            platform=platform,
+            job_url=job_url,
+            request_payload=payload,
+        )
+
+        try:
+            response = self._client.chat.completions.create(**payload)
+        except Exception:  # noqa: BLE001
+            log_event(
+                level="ERROR",
+                module="openai",
+                action="openai_response",
+                message="OpenAI API failed",
+                status="FAILED",
+                platform=platform,
+                job_url=job_url,
+                request_payload=payload,
+                stack_trace=traceback.format_exc(),
+            )
+            raise
+
+        log_event(
+            level="INFO",
+            module="openai",
+            action="openai_response",
+            message="Received proposal generation response",
+            status="SUCCESS",
+            platform=platform,
+            job_url=job_url,
+            request_payload=payload,
+            response_payload=response.model_dump() if hasattr(response, "model_dump") else None,
         )
         content = (response.choices[0].message.content or "").strip()
 

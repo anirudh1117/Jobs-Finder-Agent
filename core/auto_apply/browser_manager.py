@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 import random
 import time
+import traceback
 
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 
 from core.config.settings import PLAYWRIGHT_HEADLESS, PLAYWRIGHT_TIMEOUT
+from core.logging.system_logger import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +37,23 @@ class BrowserManager:
         try:
             self._playwright = sync_playwright().start()
             self._browser = self._playwright.chromium.launch(headless=PLAYWRIGHT_HEADLESS)
+            log_event(
+                level="INFO",
+                module="auto_apply",
+                action="browser_start",
+                message="Playwright browser started",
+                status="SUCCESS",
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to start Playwright browser.")
+            log_event(
+                level="ERROR",
+                module="auto_apply",
+                action="browser_start",
+                message="Failed to start Playwright browser",
+                status="FAILED",
+                stack_trace=traceback.format_exc(),
+            )
             self.close_browser()
             raise RuntimeError("Could not start Playwright browser.") from exc
 
@@ -66,6 +83,14 @@ class BrowserManager:
                 self._browser.close()
             except Exception:  # noqa: BLE001
                 logger.exception("Error while closing browser.")
+                log_event(
+                    level="ERROR",
+                    module="auto_apply",
+                    action="browser_close",
+                    message="Error while closing browser",
+                    status="FAILED",
+                    stack_trace=traceback.format_exc(),
+                )
             finally:
                 self._browser = None
 
@@ -74,6 +99,14 @@ class BrowserManager:
                 self._playwright.stop()
             except Exception:  # noqa: BLE001
                 logger.exception("Error while stopping Playwright.")
+                log_event(
+                    level="ERROR",
+                    module="auto_apply",
+                    action="browser_stop",
+                    message="Error while stopping Playwright",
+                    status="FAILED",
+                    stack_trace=traceback.format_exc(),
+                )
             finally:
                 self._playwright = None
 

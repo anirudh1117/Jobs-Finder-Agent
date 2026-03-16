@@ -129,3 +129,45 @@ class Application(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user.name} -> {self.job.title} ({self.status})"
+
+
+class SystemLog(models.Model):
+    """Stores centralized system events for monitoring and debugging."""
+
+    class Level(models.TextChoices):
+        """Supported severity levels for system logs."""
+
+        INFO = "INFO", "Info"
+        WARNING = "WARNING", "Warning"
+        ERROR = "ERROR", "Error"
+        CRITICAL = "CRITICAL", "Critical"
+
+    class Status(models.TextChoices):
+        """Execution outcome values for system logs."""
+
+        SUCCESS = "SUCCESS", "Success"
+        FAILED = "FAILED", "Failed"
+
+    timestamp = models.DateTimeField(auto_now_add=True)
+    level = models.CharField(max_length=16, choices=Level.choices)
+    module = models.CharField(max_length=100)
+    action = models.CharField(max_length=100)
+    platform = models.CharField(max_length=64, null=True, blank=True)
+    message = models.TextField()
+    request_payload = models.JSONField(null=True, blank=True)
+    response_payload = models.JSONField(null=True, blank=True)
+    job_url = models.TextField(null=True, blank=True)
+    stack_trace = models.TextField(null=True, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices)
+
+    class Meta:
+        ordering = ["-timestamp"]
+        indexes = [
+            models.Index(fields=["-timestamp"], name="core_syslog_time_idx"),
+            models.Index(fields=["level"], name="core_syslog_level_idx"),
+            models.Index(fields=["module"], name="core_syslog_module_idx"),
+            models.Index(fields=["status"], name="core_syslog_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"[{self.level}] {self.module}.{self.action} ({self.status})"

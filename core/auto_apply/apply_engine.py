@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import traceback
 
 from core.auto_apply.browser_manager import BrowserManager
 from core.auto_apply.platform_apply_handlers.linkedin_apply import LinkedInApplyHandler
@@ -11,6 +12,7 @@ from core.auto_apply.platform_apply_handlers.upwork_apply import UpworkApplyHand
 from core.config.constants import LINKEDIN, REMOTEOK, UPWORK
 from core.database.db_manager import DatabaseManager
 from core.database.models import Application, Job, User
+from core.logging.system_logger import log_event
 from core.notifications.telegram_notifier import TelegramNotifier
 
 logger = logging.getLogger(__name__)
@@ -75,6 +77,16 @@ class ApplyEngine:
         user = User.objects.get(pk=user_id)
         success = False
 
+        log_event(
+            level="INFO",
+            module="auto_apply",
+            action="apply_to_job",
+            platform=job.platform,
+            job_url=job.job_url,
+            message=f"Starting auto-apply for job_id={job.id}",
+            status="SUCCESS",
+        )
+
         try:
             handler = self.get_handler(job.platform)
             self._browser_manager.start_browser()
@@ -87,6 +99,16 @@ class ApplyEngine:
                 user_id,
                 job.id,
                 job.platform,
+            )
+            log_event(
+                level="ERROR",
+                module="auto_apply",
+                action="apply_to_job",
+                platform=job.platform,
+                job_url=job.job_url,
+                message=f"Auto-apply failed for job_id={job.id}",
+                status="FAILED",
+                stack_trace=traceback.format_exc(),
             )
             success = False
         finally:
@@ -101,6 +123,20 @@ class ApplyEngine:
 
         if success and score is not None:
             self._send_auto_apply_notification(job=job, score=score)
+
+        log_event(
+            level="INFO" if success else "WARNING",
+            module="auto_apply",
+            action="apply_to_job",
+            platform=job.platform,
+            job_url=job.job_url,
+            message=(
+                f"Auto-apply succeeded for job_id={job.id}"
+                if success
+                else f"Auto-apply did not complete for job_id={job.id}"
+            ),
+            status="SUCCESS" if success else "FAILED",
+        )
 
         return success
 

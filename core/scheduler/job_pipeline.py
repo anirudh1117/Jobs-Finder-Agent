@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import traceback
 from datetime import date
 from typing import Dict, List
 
@@ -30,6 +31,7 @@ from core.job_fetcher import (
 from core.job_filter.job_classifier import JobClassifier
 from core.job_filter.job_scoring import JobScorer
 from core.job_filter.skill_matcher import SkillMatcher
+from core.logging.system_logger import log_event
 from core.notifications.telegram_notifier import TelegramNotifier
 from core.proposal.proposal_builder import ProposalBuilder
 from core.proposal.proposal_generator import ProposalGenerator
@@ -100,12 +102,38 @@ class JobPipeline:
 
         for fetcher in fetchers:
             try:
+                log_event(
+                    level="INFO",
+                    module="job_fetcher",
+                    action="fetch_jobs",
+                    platform=fetcher.platform,
+                    message=f"Fetching jobs from {fetcher.platform.title()}",
+                    status="SUCCESS",
+                )
                 jobs = fetcher.fetch_jobs()
-                total_saved += fetcher.save_jobs(jobs)
+                saved_count = fetcher.save_jobs(jobs)
+                total_saved += saved_count
+                log_event(
+                    level="INFO",
+                    module="job_fetcher",
+                    action="fetch_jobs",
+                    platform=fetcher.platform,
+                    message=f"Fetched {saved_count} jobs from {fetcher.platform.title()}",
+                    status="SUCCESS",
+                )
             except Exception:  # noqa: BLE001
                 # Keep scheduler resilient: one fetcher failure should not fail the loop.
                 logger.exception(
                     "Lightweight fetch failed for platform=%s", fetcher.platform
+                )
+                log_event(
+                    level="ERROR",
+                    module="job_fetcher",
+                    action="fetch_jobs",
+                    platform=fetcher.platform,
+                    message=f"Job fetch failed for {fetcher.platform.title()}",
+                    status="FAILED",
+                    stack_trace=traceback.format_exc(),
                 )
 
         discovered_jobs = list(
@@ -118,6 +146,16 @@ class JobPipeline:
             "Lightweight job check completed | saved=%d discovered=%d",
             total_saved,
             len(self._new_job_ids_from_check),
+        )
+        log_event(
+            level="INFO",
+            module="job_fetcher",
+            action="check_for_new_jobs",
+            message=(
+                "Lightweight job check completed "
+                f"with discovered={len(self._new_job_ids_from_check)}"
+            ),
+            status="SUCCESS",
         )
 
         return len(self._new_job_ids_from_check)
@@ -135,10 +173,24 @@ class JobPipeline:
                 "Pipeline skipped for user_id=%s because no new jobs were detected.",
                 user_id,
             )
+            log_event(
+                level="INFO",
+                module="scheduler",
+                action="pipeline_skip",
+                message=f"Pipeline skipped for user_id={user_id} because no new jobs were detected.",
+                status="SUCCESS",
+            )
             return
 
         self._reset_run_state(preserve_detected_jobs=True)
         logger.info("Pipeline started for user_id=%s", user_id)
+        log_event(
+            level="INFO",
+            module="scheduler",
+            action="pipeline_start",
+            message=f"Pipeline started for user_id={user_id}",
+            status="SUCCESS",
+        )
         self._notify_pipeline_started()
 
         try:
@@ -165,6 +217,18 @@ class JobPipeline:
             len(self._generated_proposals),
             self._auto_applied_count,
             self._manual_apply_count,
+        )
+        log_event(
+            level="INFO",
+            module="scheduler",
+            action="pipeline_finish",
+            message=(
+                f"Pipeline finished for user_id={user_id} "
+                f"(fetched={len(self._fetched_jobs)}, filtered={len(self._filtered_jobs)}, "
+                f"scored={len(self._scored_jobs)}, proposals={len(self._generated_proposals)}, "
+                f"auto_applied={self._auto_applied_count}, manual_apply={self._manual_apply_count})"
+            ),
+            status="SUCCESS",
         )
 
     def fetch_jobs(self) -> None:
@@ -300,6 +364,16 @@ class JobPipeline:
                 generated[job.id] = proposal
             except Exception:  # noqa: BLE001
                 logger.exception("Proposal generation failed for job_id=%s", job.id)
+                log_event(
+                    level="ERROR",
+                    module="proposal_generator",
+                    action="generate_proposal",
+                    platform=job.platform,
+                    job_url=job.job_url,
+                    message=f"Proposal generation failed for job_id={job.id}",
+                    status="FAILED",
+                    stack_trace=traceback.format_exc(),
+                )
 
         self._generated_proposals = generated
 

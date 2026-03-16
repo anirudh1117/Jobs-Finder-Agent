@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 from django.db.models import QuerySet
 
-from core.database.models import Application, Job, ProposalTemplate, Skill, User
+from core.database.models import Application, Job, ProposalTemplate, Skill, SystemLog, User
 
 
 class DatabaseManager:
@@ -110,6 +110,35 @@ class DatabaseManager:
         """Return applications filtered by lifecycle status."""
 
         return Application.objects.filter(status=status).order_by("-applied_at")
+
+    def create_system_log(
+        self,
+        *,
+        level: str,
+        module: str,
+        action: str,
+        message: str,
+        status: str,
+        platform: str | None = None,
+        job_url: str | None = None,
+        request_payload: dict[str, Any] | None = None,
+        response_payload: dict[str, Any] | None = None,
+        stack_trace: str | None = None,
+    ) -> SystemLog:
+        """Create and persist a centralized system log record."""
+
+        return SystemLog.objects.create(
+            level=level,
+            module=module,
+            action=action,
+            message=message,
+            status=status,
+            platform=platform,
+            job_url=job_url,
+            request_payload=request_payload,
+            response_payload=response_payload,
+            stack_trace=stack_trace,
+        )
 
     def get_pending_jobs(self) -> QuerySet[Job]:
         """Return jobs that do not yet have any application records."""
