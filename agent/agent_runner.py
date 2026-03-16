@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import logging
+import os
+import django
 
 from core.config.constants import DEFAULT_USER_ID, JOB_FETCH_INTERVAL_HOURS
 from core.config import settings as app_settings
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+django.setup()
+
 from core.notifications.telegram_notifier import TelegramNotifier
 from core.scheduler.job_pipeline import JobPipeline
 from core.scheduler.job_scheduler import JobScheduler
