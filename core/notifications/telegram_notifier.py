@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from html import escape
 
 import requests
 
@@ -59,6 +60,8 @@ class TelegramNotifier:
         payload = {
             "chat_id": target_chat_id,
             "text": message,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": False,
         }
 
         try:
@@ -94,14 +97,13 @@ class TelegramNotifier:
         """
 
         message = (
-            "🔥 New Job Match\n\n"
-            f"Platform: {self._safe_attr(job, 'platform')}\n"
-            f"Title: {self._safe_attr(job, 'title')}\n"
-            f"Budget: {self._format_budget(self._safe_attr(job, 'budget'))}\n"
-            f"Score: {score:.2f}\n\n"
-            "Status: NOT APPLIED\n\n"
-            "Job Link:\n"
-            f"{self._safe_attr(job, 'job_url')}"
+            f"<b>🔥 New Job Match</b>\n\n"
+            f"<b>Platform:</b> <i>{self._safe_attr(job, 'platform')}</i>\n"
+            f"<b>Title:</b> {self._safe_attr(job, 'title')}\n"
+            f"<b>Budget:</b> <code>{escape(self._format_budget(self._safe_attr(job, 'budget')))}</code>\n"
+            f"<b>Score:</b> <b>{score:.2f}</b>\n\n"
+            f"<b>Status:</b> <i>NOT APPLIED</i>\n\n"
+            f"<b>Job Link:</b> <a href=\"{self._safe_attr(job, 'job_url')}\">Open Job 🔗</a>"
         )
         return self.send_message(message, chat_id=chat_id)
 
@@ -120,14 +122,13 @@ class TelegramNotifier:
         """
 
         message = (
-            "🚀 Job Applied\n\n"
-            f"Platform: {self._safe_attr(job, 'platform')}\n"
-            f"Title: {self._safe_attr(job, 'title')}\n"
-            f"Budget: {self._format_budget(self._safe_attr(job, 'budget'))}\n"
-            f"Score: {score:.2f}\n\n"
-            "Status: AUTO APPLIED\n\n"
-            "Job Link:\n"
-            f"{self._safe_attr(job, 'job_url')}"
+            f"<b>🚀 Job Applied</b>\n\n"
+            f"<b>Platform:</b> <i>{self._safe_attr(job, 'platform')}</i>\n"
+            f"<b>Title:</b> {self._safe_attr(job, 'title')}\n"
+            f"<b>Budget:</b> <code>{escape(self._format_budget(self._safe_attr(job, 'budget')))}</code>\n"
+            f"<b>Score:</b> <b>{score:.2f}</b>\n\n"
+            f"<b>Status:</b> <i>AUTO APPLIED</i>\n\n"
+            f"<b>Job Link:</b> <a href=\"{self._safe_attr(job, 'job_url')}\">Open Job 🔗</a>"
         )
         return self.send_message(message, chat_id=chat_id)
 
@@ -146,14 +147,13 @@ class TelegramNotifier:
         """
 
         message = (
-            "⚠️ Manual Application Required\n\n"
-            f"Platform: {self._safe_attr(job, 'platform')}\n"
-            f"Title: {self._safe_attr(job, 'title')}\n"
-            f"Budget: {self._format_budget(self._safe_attr(job, 'budget'))}\n"
-            f"Score: {score:.2f}\n\n"
-            "Status: MANUAL APPLY REQUIRED\n\n"
-            "Job Link:\n"
-            f"{self._safe_attr(job, 'job_url')}"
+            f"<b>⚠️ Manual Application Required</b>\n\n"
+            f"<b>Platform:</b> <i>{self._safe_attr(job, 'platform')}</i>\n"
+            f"<b>Title:</b> {self._safe_attr(job, 'title')}\n"
+            f"<b>Budget:</b> <code>{escape(self._format_budget(self._safe_attr(job, 'budget')))}</code>\n"
+            f"<b>Score:</b> <b>{score:.2f}</b>\n\n"
+            f"<b>Status:</b> <i>MANUAL APPLY REQUIRED</i>\n\n"
+            f"<b>Job Link:</b> <a href=\"{self._safe_attr(job, 'job_url')}\">Open Job 🔗</a>"
         )
         return self.send_message(message, chat_id=chat_id)
 
@@ -179,11 +179,11 @@ class TelegramNotifier:
         """
 
         message = (
-            "📊 Daily Freelance Agent Report\n\n"
-            f"Jobs scanned: {jobs_scanned}\n"
-            f"Relevant jobs: {relevant_jobs}\n"
-            f"Applications sent: {auto_applied}\n"
-            f"Manual apply jobs: {manual_apply}"
+            f"<b>📊 Daily Freelance Agent Report</b>\n\n"
+            f"<b>Jobs scanned:</b> {jobs_scanned}\n"
+            f"<b>Relevant jobs:</b> {relevant_jobs}\n"
+            f"<b>Applications sent:</b> {auto_applied}\n"
+            f"<b>Manual apply jobs:</b> {manual_apply}"
         )
         return self.send_message(message, chat_id=chat_id)
 
@@ -200,7 +200,7 @@ class TelegramNotifier:
             True when message is sent successfully.
         """
 
-        message = f"❗ Freelance Agent Error\n\n{error_message}"
+        message = f"<b>❗ Freelance Agent Error</b>\n\n<i>{escape(error_message)}</i>"
         return self.send_message(message, chat_id=chat_id)
 
     @staticmethod
@@ -208,7 +208,10 @@ class TelegramNotifier:
         """Safely get an attribute from an object and convert it to string."""
 
         value = getattr(obj, attr_name, "")
-        return str(value) if value is not None else ""
+        if value is None:
+            return ""
+        # Escape to be safe for HTML parse_mode
+        return escape(str(value))
 
     @staticmethod
     def _format_budget(value: Any) -> str:
