@@ -11,20 +11,26 @@ from django.utils import timezone
 from core.applications.application_manager import ApplicationManager
 from core.config.constants import JOB_MATCH_THRESHOLD
 from core.config.settings import (
+    ENABLE_FREELANCER_FETCH,
     ENABLE_LINKEDIN_FETCH,
     ENABLE_MERCOR_FETCH,
     ENABLE_OUTLIER_FETCH,
     ENABLE_REMOTEOK_FETCH,
+    ENABLE_REMOTIVE_FETCH,
     ENABLE_UPWORK_FETCH,
+    ENABLE_WEWORKREMOTELY_FETCH,
 )
 from core.database.db_manager import DatabaseManager
 from core.database.models import Job, UserJobMatch, UserProfile
 from core.job_fetcher import (
+    FreelancerFetcher,
     LinkedInFetcher,
     MercorFetcher,
     OutlierFetcher,
     RemoteOKFetcher,
+    RemotiveFetcher,
     UpworkFetcher,
+    WeWorkRemotelyFetcher,
 )
 from core.job_filter.job_classifier import JobClassifier
 from core.job_filter.job_scoring import JobScorer
@@ -87,6 +93,12 @@ class JobPipeline:
             fetchers.append(RemoteOKFetcher(db_manager=self._db))
         if ENABLE_LINKEDIN_FETCH:
             fetchers.append(LinkedInFetcher(db_manager=self._db))
+        if ENABLE_REMOTIVE_FETCH:
+            fetchers.append(RemotiveFetcher(db_manager=self._db))
+        if ENABLE_WEWORKREMOTELY_FETCH:
+            fetchers.append(WeWorkRemotelyFetcher(db_manager=self._db))
+        if ENABLE_FREELANCER_FETCH:
+            fetchers.append(FreelancerFetcher(db_manager=self._db))
 
         for fetcher in fetchers:
             try:

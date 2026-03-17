@@ -157,6 +157,10 @@ class BaseJobFetcher(ABC):
         )
 
 
+# Backwards-compatible alias for modules expecting BaseFetcher naming.
+BaseFetcher = BaseJobFetcher
+
+
 def _safe_float(value: Any, default: float = 0.0) -> float:
     """Best-effort conversion of arbitrary values to float."""
 
