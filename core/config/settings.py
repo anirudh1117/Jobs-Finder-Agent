@@ -53,6 +53,7 @@ ENABLE_APPLICATION_LOGGING: bool = _get_env_bool("ENABLE_APPLICATION_LOGGING", T
 
 TELEGRAM_BOT_TOKEN: str | None = get_env_variable("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID: str | None = get_env_variable("TELEGRAM_CHAT_ID")
+TELEGRAM_BOT_USERNAME: str = get_env_variable("TELEGRAM_BOT_USERNAME", "jobs_agent_monitor_bot")
 
 DB_ENGINE: str = get_env_variable("DB_ENGINE", "django.db.backends.postgresql")
 DB_NAME: str = get_env_variable("DB_NAME", "freelance_agent")

@@ -17,7 +17,10 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from api.telegram_webhook import telegram_webhook
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('ui.urls')),
+    path('api/telegram/webhook', telegram_webhook, name='telegram-webhook'),
 ]

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.database.db_manager import DatabaseManager
-from core.database.models import Job, ResumeData
+from core.database.models import Job, ResumeData, UserProfile
 
 
 class ProposalBuilder:
@@ -43,22 +43,28 @@ class ProposalBuilder:
             .order_by("-created_at")
             .first()
         )
-        if latest_resume is None:
+        profile = UserProfile.objects.filter(user_id=user_id).order_by("-updated_at").first()
+
+        if latest_resume is None and profile is None:
             raise ValueError(
                 f"No resume summary found for user {user_id}. "
                 "Run resume extraction before generating proposals."
             )
 
-        skills = list(
+        fallback_skills = list(
             self._db.get_user_skills(user_id).values_list("skill_name", flat=True)
         )
+        skills = profile.skills if profile and profile.skills else fallback_skills
 
         template_obj = self._db.get_proposal_template(user_id)
         template_text = template_obj.template_text if template_obj else ""
 
         return {
-            "summary": latest_resume.summary,
+            "headline": profile.headline if profile else "",
+            "summary": profile.summary if profile and profile.summary else latest_resume.summary,
             "skills": skills,
+            "roles": profile.roles if profile else [],
+            "proposal_style_notes": profile.proposal_style_notes if profile else "",
             "template": template_text,
         }
 

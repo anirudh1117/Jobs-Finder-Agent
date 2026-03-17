@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand fw-semibold" href="/dashboard">Freelance Agent</a>
+        <div class="d-flex align-items-center gap-3 text-white">
+            <div class="navbar-nav flex-row gap-2">
+                <a class="nav-link" href="/jobs">Jobs</a>
+                <a class="nav-link" href="/applications">Applications</a>
+                <a class="nav-link active" href="/profile/">Profile</a>
+                <a class="nav-link" href="/upload-resume">Upload Resume</a>
+                <a class="nav-link" href="/connect-telegram">Telegram</a>
+            </div>
+            <span class="small text-white-50">{{ request.user.username }}</span>
+            <form method="post" action="/logout/" class="m-0">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-light btn-sm">Logout</button>
+            </form>
+        </div>
+    </div>
+</nav>
+
+<div class="container py-4">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body p-4">
+            <h1 class="h3 mb-3">Your Technical Profile</h1>
+            <p class="text-muted">Edit your profile details used for matching and proposal personalization.</p>
+
+            <form method="post">
+                {% csrf_token %}
+
+                <div class="mb-3">
+                    <label class="form-label" for="headline">Headline</label>
+                    <input type="text" class="form-control" id="headline" name="headline" maxlength="255" value="{{ profile.headline }}" placeholder="e.g. Senior Backend Engineer | Django | API Design">
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label" for="hourly_rate">Hourly Rate (USD)</label>
+                    <input type="text" class="form-control" id="hourly_rate" name="hourly_rate" value="{{ profile.hourly_rate|default:'' }}" placeholder="e.g. 45.00">
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label" for="skills">Skills</label>
+                    <textarea class="form-control" id="skills" name="skills" rows="5" placeholder="One per line or comma-separated">{{ skills_text }}</textarea>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label" for="roles">Roles</label>
+                    <textarea class="form-control" id="roles" name="roles" rows="4" placeholder="One per line or comma-separated">{{ roles_text }}</textarea>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label" for="summary">Summary</label>
+                    <textarea class="form-control" id="summary" name="summary" rows="6" placeholder="Short summary used for profile and proposals">{{ profile.summary }}</textarea>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label" for="proposal_style_notes">Proposal Style Notes</label>
+                    <textarea class="form-control" id="proposal_style_notes" name="proposal_style_notes" rows="5" placeholder="Tone preferences, writing style, things to include or avoid">{{ profile.proposal_style_notes|default:'' }}</textarea>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Save Profile</button>
+                <a href="/connect-telegram" class="btn btn-outline-info ms-2">Connect Telegram</a>
+                <a href="/dashboard" class="btn btn-outline-secondary ms-2">Back to Dashboard</a>
+            </form>
+        </div>
+    </div>
+</div>
+</body>
+</html>

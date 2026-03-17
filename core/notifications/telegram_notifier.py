@@ -13,13 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramNotifier:
-    """Send plain-text notifications to Telegram via Bot HTTP API."""
+    """Send plain-text notifications to Telegram via Bot HTTP API.
+
+    Supports both global notifications (to a configured default chat ID)
+    and per-user notifications (to specific chat IDs from user profiles).
+    """
 
     def __init__(self) -> None:
         """Load Telegram configuration and build sendMessage endpoint.
 
-        Raises:
-            ValueError: If TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing.
+        Note: TELEGRAM_CHAT_ID is now optional. If not provided, only
+        per-user notifications (with explicit chat_id) can be sent.
         """
 
         self._bot_token = TELEGRAM_BOT_TOKEN
@@ -29,25 +33,31 @@ class TelegramNotifier:
             raise ValueError(
                 "Missing TELEGRAM_BOT_TOKEN. Set it in environment variables."
             )
-        if not self._chat_id:
-            raise ValueError(
-                "Missing TELEGRAM_CHAT_ID. Set it in environment variables."
-            )
 
         self._api_url = f"https://api.telegram.org/bot{self._bot_token}/sendMessage"
 
-    def send_message(self, message: str) -> bool:
-        """Send a plain-text message to the configured Telegram chat.
+    def send_message(self, message: str, chat_id: str | None = None) -> bool:
+        """Send a plain-text message to a Telegram chat.
 
         Args:
             message: Message content to send.
+            chat_id: Optional Telegram chat ID. If not provided, uses the default
+                    TELEGRAM_CHAT_ID from environment. If neither is available, returns False.
 
         Returns:
             True if Telegram accepted the message, otherwise False.
         """
 
+        target_chat_id = chat_id or self._chat_id
+        if not target_chat_id:
+            logger.warning(
+                "No chat_id provided and TELEGRAM_CHAT_ID not configured. "
+                "Cannot send message."
+            )
+            return False
+
         payload = {
-            "chat_id": self._chat_id,
+            "chat_id": target_chat_id,
             "text": message,
         }
 
@@ -66,14 +76,18 @@ class TelegramNotifier:
             logger.error("Telegram API rejected message: %s", data)
             return False
 
+        logger.debug(f"Telegram message sent to chat {target_chat_id}")
         return True
 
-    def send_job_match_notification(self, job: Any, score: float) -> bool:
+    def send_job_match_notification(
+        self, job: Any, score: float, chat_id: str | None = None
+    ) -> bool:
         """Send notification for a high-quality job match.
 
         Args:
             job: Job object with platform, title, budget, and job_url fields.
             score: Computed relevance score.
+            chat_id: Optional Telegram chat ID for per-user notification.
 
         Returns:
             True when message is sent successfully.
@@ -89,14 +103,17 @@ class TelegramNotifier:
             "Job Link:\n"
             f"{self._safe_attr(job, 'job_url')}"
         )
-        return self.send_message(message)
+        return self.send_message(message, chat_id=chat_id)
 
-    def send_auto_apply_notification(self, job: Any, score: float) -> bool:
+    def send_auto_apply_notification(
+        self, job: Any, score: float, chat_id: str | None = None
+    ) -> bool:
         """Send notification when a job is successfully auto-applied.
 
         Args:
             job: Job object with platform, title, budget, and job_url fields.
             score: Computed relevance score.
+            chat_id: Optional Telegram chat ID for per-user notification.
 
         Returns:
             True when message is sent successfully.
@@ -112,14 +129,17 @@ class TelegramNotifier:
             "Job Link:\n"
             f"{self._safe_attr(job, 'job_url')}"
         )
-        return self.send_message(message)
+        return self.send_message(message, chat_id=chat_id)
 
-    def send_manual_apply_notification(self, job: Any, score: float) -> bool:
+    def send_manual_apply_notification(
+        self, job: Any, score: float, chat_id: str | None = None
+    ) -> bool:
         """Send notification when manual application is required.
 
         Args:
             job: Job object with platform, title, budget, and job_url fields.
             score: Computed relevance score.
+            chat_id: Optional Telegram chat ID for per-user notification.
 
         Returns:
             True when message is sent successfully.
@@ -135,7 +155,7 @@ class TelegramNotifier:
             "Job Link:\n"
             f"{self._safe_attr(job, 'job_url')}"
         )
-        return self.send_message(message)
+        return self.send_message(message, chat_id=chat_id)
 
     def send_daily_summary(
         self,
@@ -143,6 +163,7 @@ class TelegramNotifier:
         relevant_jobs: int,
         auto_applied: int,
         manual_apply: int,
+        chat_id: str | None = None,
     ) -> bool:
         """Send a daily summary report for pipeline activity.
 
@@ -151,6 +172,7 @@ class TelegramNotifier:
             relevant_jobs: Jobs that passed filtering/scoring criteria.
             auto_applied: Jobs successfully auto-applied.
             manual_apply: Jobs requiring manual application.
+            chat_id: Optional Telegram chat ID for per-user notification.
 
         Returns:
             True when message is sent successfully.
@@ -163,20 +185,23 @@ class TelegramNotifier:
             f"Applications sent: {auto_applied}\n"
             f"Manual apply jobs: {manual_apply}"
         )
-        return self.send_message(message)
+        return self.send_message(message, chat_id=chat_id)
 
-    def send_error_notification(self, error_message: str) -> bool:
+    def send_error_notification(
+        self, error_message: str, chat_id: str | None = None
+    ) -> bool:
         """Send a critical pipeline error notification.
 
         Args:
             error_message: Human-readable error details.
+            chat_id: Optional Telegram chat ID for per-user notification.
 
         Returns:
             True when message is sent successfully.
         """
 
         message = f"❗ Freelance Agent Error\n\n{error_message}"
-        return self.send_message(message)
+        return self.send_message(message, chat_id=chat_id)
 
     @staticmethod
     def _safe_attr(obj: Any, attr_name: str) -> str:

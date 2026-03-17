@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import logging
 import traceback
-from datetime import date
 from typing import Dict, List
 
-from django.db.models import QuerySet
 from django.utils import timezone
 
-from core.auto_apply.apply_engine import ApplyEngine
-from core.config.constants import MAX_APPLICATIONS_PER_DAY
+from core.applications.application_manager import ApplicationManager
+from core.config.constants import JOB_MATCH_THRESHOLD
 from core.config.settings import (
     ENABLE_LINKEDIN_FETCH,
     ENABLE_MERCOR_FETCH,
@@ -20,7 +18,7 @@ from core.config.settings import (
     ENABLE_UPWORK_FETCH,
 )
 from core.database.db_manager import DatabaseManager
-from core.database.models import Application, Job
+from core.database.models import Job, UserJobMatch, UserProfile
 from core.job_fetcher import (
     LinkedInFetcher,
     MercorFetcher,
@@ -33,9 +31,6 @@ from core.job_filter.job_scoring import JobScorer
 from core.job_filter.skill_matcher import SkillMatcher
 from core.logging.system_logger import log_event
 from core.notifications.telegram_notifier import TelegramNotifier
-from core.proposal.proposal_builder import ProposalBuilder
-from core.proposal.proposal_generator import ProposalGenerator
-from core.proposal.proposal_optimizer import ProposalOptimizer
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +39,7 @@ class JobPipeline:
     """Coordinates end-to-end pipeline stages without owning business logic.
 
     This class orchestrates existing modules in a deterministic sequence:
-    fetch -> filter -> score -> generate proposals -> apply.
+    fetch -> store global jobs -> score against each user -> create matches.
     """
 
     def __init__(self, db_manager: DatabaseManager | None = None) -> None:
@@ -56,11 +51,7 @@ class JobPipeline:
         self._classifier = JobClassifier()
         self._scorer = JobScorer()
 
-        self._proposal_builder = ProposalBuilder(db_manager=self._db)
-        self._proposal_generator: ProposalGenerator | None = None
-        self._proposal_optimizer = ProposalOptimizer()
-
-        self._apply_engine = ApplyEngine(db_manager=self._db)
+        self._application_manager = ApplicationManager(db_manager=self._db)
         self._notifier = self._initialize_notifier()
 
         self._run_started_at = timezone.now()
@@ -68,19 +59,16 @@ class JobPipeline:
         self._fetched_jobs: List[Job] = []
         self._filtered_jobs: List[Job] = []
         self._scored_jobs: List[Job] = []
-        self._skill_match_ratios: Dict[int, float] = {}
-        self._generated_proposals: Dict[int, str] = {}
+        self._user_match_counts: Dict[int, int] = {}
         self._notified_job_match_ids: set[int] = set()
         self._notified_manual_apply_ids: set[int] = set()
-        self._auto_applied_count = 0
-        self._manual_apply_count = 0
 
     def check_for_new_jobs(self) -> int:
         """Run a lightweight fetch pass and return newly discovered job count.
 
-        This method fetches jobs from all enabled platforms, persists only new
-        records (deduped by job URL), and caches newly inserted job IDs to be
-        consumed by the next full pipeline run.
+        This method fetches jobs from all enabled platforms, persists unique
+        jobs globally, and caches newly inserted job IDs for user matching in
+        the next pipeline run.
         """
 
         logger.info("Lightweight job check started")
@@ -118,7 +106,7 @@ class JobPipeline:
                     module="job_fetcher",
                     action="fetch_jobs",
                     platform=fetcher.platform,
-                    message=f"Fetched {saved_count} jobs from {fetcher.platform.title()}",
+                    message=f"Fetched {saved_count} new jobs from {fetcher.platform.title()}",
                     status="SUCCESS",
                 )
             except Exception:  # noqa: BLE001
@@ -137,14 +125,12 @@ class JobPipeline:
                 )
 
         discovered_jobs = list(
-            Job.objects.filter(created_at__gte=run_started_at)
-            .order_by("-created_at")
+            Job.objects.filter(created_at__gte=run_started_at).order_by("-created_at")
         )
         self._new_job_ids_from_check = [job.id for job in discovered_jobs]
 
         logger.info(
-            "Lightweight job check completed | saved=%d discovered=%d",
-            total_saved,
+            "Lightweight job check completed | discovered=%d",
             len(self._new_job_ids_from_check),
         )
         log_event(
@@ -161,11 +147,11 @@ class JobPipeline:
         return len(self._new_job_ids_from_check)
 
     def run_pipeline(self, user_id: int) -> None:
-        """Run the full job automation workflow in stage order.
+        """Run global job matching across all active users.
 
         Args:
-            user_id: User identifier for skill matching, proposal generation,
-                and job applications.
+            user_id: Legacy scheduler entrypoint identifier. The matching pass
+                runs across all active users regardless of this specific value.
         """
 
         if not self._new_job_ids_from_check:
@@ -195,10 +181,7 @@ class JobPipeline:
 
         try:
             self._run_stage("fetch_jobs", self.fetch_jobs)
-            self._run_stage("filter_jobs", self.filter_jobs, user_id)
-            self._run_stage("score_jobs", self.score_jobs)
-            self._run_stage("generate_proposals", self.generate_proposals, user_id)
-            self._run_stage("apply_to_jobs", self.apply_to_jobs, user_id)
+            self._run_stage("match_jobs_for_users", self.match_jobs_for_users)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Pipeline execution failed for user_id=%s", user_id)
             self._notify_error(str(exc))
@@ -209,14 +192,11 @@ class JobPipeline:
             self._new_job_ids_from_check = []
 
         logger.info(
-            "Pipeline finished for user_id=%s | fetched=%d filtered=%d scored=%d proposals=%d auto_applied=%d manual_apply=%d",
+            "Pipeline finished for user_id=%s | fetched=%d matched_users=%d total_matches=%d",
             user_id,
             len(self._fetched_jobs),
-            len(self._filtered_jobs),
-            len(self._scored_jobs),
-            len(self._generated_proposals),
-            self._auto_applied_count,
-            self._manual_apply_count,
+            len(self._user_match_counts),
+            sum(self._user_match_counts.values()),
         )
         log_event(
             level="INFO",
@@ -224,212 +204,114 @@ class JobPipeline:
             action="pipeline_finish",
             message=(
                 f"Pipeline finished for user_id={user_id} "
-                f"(fetched={len(self._fetched_jobs)}, filtered={len(self._filtered_jobs)}, "
-                f"scored={len(self._scored_jobs)}, proposals={len(self._generated_proposals)}, "
-                f"auto_applied={self._auto_applied_count}, manual_apply={self._manual_apply_count})"
+                f"(fetched={len(self._fetched_jobs)}, matched_users={len(self._user_match_counts)}, "
+                f"total_matches={sum(self._user_match_counts.values())})"
             ),
             status="SUCCESS",
         )
 
     def fetch_jobs(self) -> None:
-        """Load jobs inserted during the lightweight check stage."""
+        """Load globally stored jobs discovered during the lightweight check stage."""
 
         logger.info("Stage fetch_jobs started")
 
-        fetched_qs: QuerySet[Job] = Job.objects.filter(
-            id__in=self._new_job_ids_from_check
-        ).order_by("-created_at")
-        self._fetched_jobs = list(fetched_qs)
+        self._fetched_jobs = list(
+            Job.objects.filter(id__in=self._new_job_ids_from_check).order_by("-created_at")
+        )
 
         logger.info(
             "Stage fetch_jobs completed | fetched_jobs=%d",
             len(self._fetched_jobs),
         )
 
-    def filter_jobs(self, user_id: int) -> None:
-        """Filter out jobs with zero skill matches for the target user.
+    def match_jobs_for_users(self) -> None:
+        """Score newly fetched jobs against each active user and create matches."""
 
-        Args:
-            user_id: User identifier used to fetch skill inventory.
-        """
+        logger.info("Stage match_jobs_for_users started")
 
-        logger.info("Stage filter_jobs started")
-
-        user_skills = self._skill_matcher.get_user_skills(user_id)
-        if not user_skills:
-            logger.warning("No user skills found for user_id=%s; all jobs filtered out.", user_id)
-            self._filtered_jobs = []
-            return
-
-        filtered: List[Job] = []
-        match_ratios: Dict[int, float] = {}
-        for job in self._fetched_jobs:
-            match_result = self._skill_matcher.match_job_skills(
-                job_title=job.title,
-                job_description=job.description,
-                user_skills=user_skills,
-            )
-            if int(match_result.get("match_count", 0)) > 0:
-                filtered.append(job)
-                match_ratios[job.id] = float(match_result.get("match_ratio", 0.0))
-
-        self._filtered_jobs = filtered
-        self._skill_match_ratios = match_ratios
-
-        logger.info(
-            "Stage filter_jobs completed | input=%d kept=%d removed=%d",
-            len(self._fetched_jobs),
-            len(self._filtered_jobs),
-            max(len(self._fetched_jobs) - len(self._filtered_jobs), 0),
+        active_user_ids = list(
+            UserProfile.objects.select_related("user")
+            .filter(user__is_active=True)
+            .values_list("user_id", flat=True)
+            .distinct()
         )
 
-    def score_jobs(self) -> None:
-        """Classify and score filtered jobs, then persist score/category fields."""
+        total_matches = 0
+        for auth_user_id in active_user_ids:
+            match_count = self._match_jobs_for_user(auth_user_id)
+            self._user_match_counts[auth_user_id] = match_count
+            total_matches += match_count
 
-        logger.info("Stage score_jobs started")
+        logger.info(
+            "Stage match_jobs_for_users completed | users=%d total_matches=%d",
+            len(active_user_ids),
+            total_matches,
+        )
 
-        scored: List[Job] = []
-        for job in self._filtered_jobs:
+    def _match_jobs_for_user(self, user_id: int) -> int:
+        """Create or update UserJobMatch records for a single user."""
+
+        user_skills = self._skill_matcher.get_user_skills(user_id)
+        user_roles = self._get_user_roles(user_id=user_id)
+        if not user_skills and not user_roles:
+            logger.info("Skipping matching for user_id=%s with no skills/roles", user_id)
+            return 0
+
+        match_count = 0
+        for job in self._fetched_jobs:
             hourly_rate = float(job.hourly_rate or 0.0)
             budget = float(job.budget or 0.0)
-
             category = self._classifier.classify_job(
                 job_title=job.title,
                 job_description=job.description,
                 hourly_rate=hourly_rate,
             )
 
-            match_ratio = self._skill_match_ratios.get(job.id, 0.0)
+            match_result = self._skill_matcher.match_job_skills(
+                job_title=job.title,
+                job_description=job.description,
+                user_skills=user_skills,
+            )
+            match_ratio = float(match_result.get("match_ratio", 0.0))
+            role_match_score = self._calculate_role_match_score(job=job, user_roles=user_roles)
+            keyword_relevance_score = self._calculate_keyword_relevance_score(
+                job=job,
+                user_skills=user_skills,
+                user_roles=user_roles,
+            )
+            experience_keyword_score = self._calculate_experience_keyword_score(job=job)
 
             score = self._scorer.calculate_job_score(
                 skill_match_ratio=match_ratio,
+                role_match_score=role_match_score,
+                keyword_relevance_score=keyword_relevance_score,
+                experience_keyword_score=experience_keyword_score,
                 category=category,
                 budget=budget,
                 hourly_rate=hourly_rate,
             )
 
-            job.category = category
-            job.score = score
-            job.save(update_fields=["category", "score"])
-            scored.append(job)
-
-            if self._scorer.should_apply(score) and not job.applications.exists():
-                self._notify_high_quality_job(job=job, score=score)
-
-        self._scored_jobs = scored
-
-        logger.info("Stage score_jobs completed | scored_jobs=%d", len(self._scored_jobs))
-
-    def generate_proposals(self, user_id: int) -> None:
-        """Generate optimized proposal text for jobs above apply threshold.
-
-        Generated proposals are stored temporarily in-memory for the current run
-        and keyed by job id.
-
-        Args:
-            user_id: User identifier used to load context and templates.
-        """
-
-        logger.info("Stage generate_proposals started")
-
-        if self._proposal_generator is None:
-            try:
-                self._proposal_generator = ProposalGenerator()
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "ProposalGenerator initialization failed; skipping proposal stage."
+            if score > JOB_MATCH_THRESHOLD:
+                self._application_manager.create_or_update_user_job_match(
+                    user_id=user_id,
+                    job=job,
+                    match_score=int(round(score)),
+                    application_status=UserJobMatch.ApplicationStatus.NOT_APPLIED,
                 )
-                self._generated_proposals = {}
-                return
-
-        user_context = self._proposal_builder.get_user_context(user_id)
-        generated: Dict[int, str] = {}
-
-        for job in self._scored_jobs:
-            if not self._scorer.should_apply(job.score):
-                continue
-
-            try:
-                job_context = self._proposal_builder.build_job_context(job)
-                proposal_input = self._proposal_builder.build_proposal_input(
-                    user_context=user_context,
-                    job_context=job_context,
-                )
-
-                proposal = self._proposal_generator.generate_proposal(
-                    user_context=proposal_input["user_context"],
-                    job_context=proposal_input["job_context"],
-                )
-                proposal = self._proposal_optimizer.optimize_proposal(proposal)
-                generated[job.id] = proposal
-            except Exception:  # noqa: BLE001
-                logger.exception("Proposal generation failed for job_id=%s", job.id)
+                match_count += 1
+            else:
+                logger.info("Job rejected due to low score | user_id=%s title=%s score=%.2f", user_id, job.title, score)
                 log_event(
-                    level="ERROR",
-                    module="proposal_generator",
-                    action="generate_proposal",
+                    level="INFO",
+                    module="job_filter",
+                    action="reject_job",
                     platform=job.platform,
                     job_url=job.job_url,
-                    message=f"Proposal generation failed for job_id={job.id}",
-                    status="FAILED",
-                    stack_trace=traceback.format_exc(),
+                    message="Job rejected due to low score",
+                    status="SUCCESS",
                 )
 
-        self._generated_proposals = generated
-
-        logger.info(
-            "Stage generate_proposals completed | generated=%d",
-            len(self._generated_proposals),
-        )
-
-    def apply_to_jobs(self, user_id: int) -> None:
-        """Submit applications for proposal-ready jobs via apply engine.
-
-        Args:
-            user_id: User identifier associated with each application.
-        """
-
-        logger.info("Stage apply_to_jobs started")
-
-        applications_today = self._applications_count_today(user_id)
-        remaining_quota = max(MAX_APPLICATIONS_PER_DAY - applications_today, 0)
-
-        if remaining_quota <= 0:
-            logger.info(
-                "Daily apply quota reached for user_id=%s (%d/%d)",
-                user_id,
-                applications_today,
-                MAX_APPLICATIONS_PER_DAY,
-            )
-            return
-
-        applied_success = 0
-        for job in self._scored_jobs:
-            if remaining_quota <= 0:
-                break
-            if job.id not in self._generated_proposals:
-                continue
-
-            proposal_text = self._generated_proposals[job.id]
-            success = self._apply_engine.apply_to_job(
-                user_id=user_id,
-                job=job,
-                proposal_text=proposal_text,
-                score=float(job.score),
-            )
-            if success:
-                applied_success += 1
-                self._auto_applied_count += 1
-                remaining_quota -= 1
-            else:
-                self._manual_apply_count += 1
-                self._notify_manual_apply_required(job=job, score=float(job.score))
-
-        logger.info(
-            "Stage apply_to_jobs completed | successful=%d remaining_quota=%d",
-            applied_success,
-            remaining_quota,
-        )
+        return match_count
 
     def _run_stage(self, stage_name: str, stage_fn, *args) -> None:
         """Run a single stage with error isolation and logging."""
@@ -448,17 +330,57 @@ class JobPipeline:
         self._fetched_jobs = []
         self._filtered_jobs = []
         self._scored_jobs = []
-        self._skill_match_ratios = {}
-        self._generated_proposals = {}
-        self._auto_applied_count = 0
-        self._manual_apply_count = 0
+        self._user_match_counts = {}
+
+    def _get_user_roles(self, user_id: int | None) -> list[str]:
+        """Return normalized role preferences for the target user when available."""
+
+        if user_id is None:
+            return []
+        profile = UserProfile.objects.filter(user_id=user_id).order_by("-updated_at").first()
+        if profile is None:
+            return []
+        return [str(role).strip().lower() for role in profile.roles if str(role).strip()]
 
     @staticmethod
-    def _applications_count_today(user_id: int) -> int:
-        """Return number of application records created today for a user."""
+    def _calculate_role_match_score(job: Job, user_roles: list[str]) -> float:
+        """Return a role-match component based on role keywords in job text."""
 
-        today = date.today()
-        return Application.objects.filter(user_id=user_id, applied_at__date=today).count()
+        if not user_roles:
+            return 0.0
+        job_text = f"{job.title} {job.description}".lower()
+        matches = sum(1 for role in user_roles if role in job_text)
+        return min(float(matches), 2.0)
+
+    @staticmethod
+    def _calculate_keyword_relevance_score(
+        job: Job,
+        user_skills: list[str],
+        user_roles: list[str],
+    ) -> float:
+        """Return a keyword relevance component based on user/job overlap."""
+
+        relevant_keywords = list(user_skills) + list(user_roles)
+        job_text = f"{job.title} {job.description} {' '.join(job.skills or [])}".lower()
+        matches = sum(1 for keyword in relevant_keywords if keyword in job_text)
+        return min(matches / 2.0, 2.0)
+
+    @staticmethod
+    def _calculate_experience_keyword_score(job: Job) -> float:
+        """Return an experience-signal component from common experience phrases."""
+
+        experience_keywords = [
+            "senior",
+            "lead",
+            "expert",
+            "years of experience",
+            "production experience",
+            "architecture",
+            "scalable systems",
+        ]
+        job_text = f"{job.title} {job.description}".lower()
+        matches = sum(1 for keyword in experience_keywords if keyword in job_text)
+        return min(matches / 2.0, 2.0)
 
     @staticmethod
     def _initialize_notifier() -> TelegramNotifier | None:
@@ -518,12 +440,13 @@ class JobPipeline:
     def _notify_daily_summary(self) -> None:
         """Send best-effort pipeline summary notification."""
 
+        total_matches = sum(self._user_match_counts.values())
         self._send_notification(
             lambda notifier: notifier.send_daily_summary(
                 jobs_scanned=len(self._fetched_jobs),
-                relevant_jobs=len(self._filtered_jobs),
-                auto_applied=self._auto_applied_count,
-                manual_apply=self._manual_apply_count,
+                relevant_jobs=total_matches,
+                auto_applied=0,
+                manual_apply=0,
             ),
             "daily summary",
         )

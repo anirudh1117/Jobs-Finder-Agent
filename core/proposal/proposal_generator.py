@@ -124,7 +124,10 @@ class ProposalGenerator:
         """Build the full structured prompt required for proposal generation."""
 
         summary = str(user_context.get("summary", "")).strip()
+        headline = str(user_context.get("headline", "")).strip()
         skills = user_context.get("skills", []) or []
+        roles = user_context.get("roles", []) or []
+        proposal_style_notes = str(user_context.get("proposal_style_notes", "")).strip()
         template = str(user_context.get("template", "")).strip()
 
         title = str(job_context.get("title", "")).strip()
@@ -136,7 +139,13 @@ class ProposalGenerator:
         if not skills_text:
             skills_text = "Not specified"
 
+        roles_text = ", ".join(str(role).strip() for role in roles if str(role).strip())
+        if not roles_text:
+            roles_text = "Not specified"
+
         template_text = template if template else "No saved template available."
+        headline_text = headline if headline else "Not specified"
+        style_notes_text = proposal_style_notes if proposal_style_notes else "No additional style notes."
 
         pricing_text = (
             f"Budget: ${budget:.2f}; Hourly rate: ${hourly_rate:.2f}"
@@ -147,6 +156,12 @@ class ProposalGenerator:
         return f"""SECTION 1 - User context
 Resume summary:
 {summary}
+
+Headline:
+{headline_text}
+
+Preferred roles:
+{roles_text}
 
 Skills:
 {skills_text}
@@ -163,6 +178,7 @@ Do not produce lists.
 Use normal paragraphs.
 Avoid robotic tone.
 Output plain text only.
+Respect these additional style notes when relevant: {style_notes_text}
 
 SECTION 3 - Style anchor example
 Example proposal style:

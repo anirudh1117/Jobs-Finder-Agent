@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from core.config.constants import CATEGORY_AI_TRAINING, CATEGORY_SOFTWARE_DEV
+from core.config.constants import CATEGORY_AI_TRAINING, CATEGORY_SOFTWARE_DEV, JOB_MATCH_THRESHOLD
 
 # Thresholds used in scoring.
 _BUDGET_HIGH_THRESHOLD: float = 500.0
 _BUDGET_MID_THRESHOLD: float = 200.0
 _HOURLY_HIGH_THRESHOLD: float = 50.0
 _HOURLY_MID_THRESHOLD: float = 20.0
+_KEYWORD_SCORE_CAP: float = 2.0
+_EXPERIENCE_SCORE_CAP: float = 2.0
 
 # Minimum score required to trigger an automatic application.
 _AUTO_APPLY_THRESHOLD: float = 5.0
@@ -32,6 +34,9 @@ class JobScorer:
     def calculate_job_score(
         self,
         skill_match_ratio: float,
+        role_match_score: float,
+        keyword_relevance_score: float,
+        experience_keyword_score: float,
         category: str,
         budget: float,
         hourly_rate: float,
@@ -41,12 +46,18 @@ class JobScorer:
         Score components:
 
         * Skill match: ``skill_match_ratio * 5``
+        * Role match score: +0 to +2 based on title/description alignment
+        * Keyword relevance score: +0 to +2 based on matching user/job keywords
+        * Experience score: +0 to +2 based on professional experience signals
         * Category bonus: +5 for AI training, +3 for software dev, +0 otherwise
         * Budget bonus: +2 if budget ≥ 500, +1 if budget ≥ 200
         * Hourly bonus: +2 if hourly_rate ≥ 50, +1 if hourly_rate ≥ 20
 
         Args:
             skill_match_ratio: Float in [0, 1] from SkillMatcher.match_job_skills.
+            role_match_score: Precomputed score for role/title alignment.
+            keyword_relevance_score: Precomputed score for keyword relevance.
+            experience_keyword_score: Precomputed score for experience keyword signals.
             category: One of the CATEGORY_* constants from constants.py.
             budget: Fixed-price budget in USD (0 when not applicable).
             hourly_rate: Offered hourly rate in USD (0 when not applicable).
@@ -56,11 +67,27 @@ class JobScorer:
         """
 
         skill_score = self._skill_score(skill_match_ratio)
+        role_score = self._bounded_bonus(role_match_score, 2.0)
+        keyword_score = self._bounded_bonus(keyword_relevance_score, _KEYWORD_SCORE_CAP)
+        experience_score = self._bounded_bonus(experience_keyword_score, _EXPERIENCE_SCORE_CAP)
         category_bonus = self._category_bonus(category)
         budget_bonus = self._budget_bonus(budget)
         hourly_bonus = self._hourly_bonus(hourly_rate)
 
-        return skill_score + category_bonus + budget_bonus + hourly_bonus
+        return (
+            skill_score
+            + role_score
+            + keyword_score
+            + experience_score
+            + category_bonus
+            + budget_bonus
+            + hourly_bonus
+        )
+
+    def should_save(self, score: float) -> bool:
+        """Return True when a job meets the persistence quality threshold."""
+
+        return score > JOB_MATCH_THRESHOLD
 
     def should_apply(self, score: float) -> bool:
         """Return True when the job score is high enough to warrant applying.
@@ -141,3 +168,11 @@ class JobScorer:
         if hourly_rate >= _HOURLY_MID_THRESHOLD:
             return 1.0
         return 0.0
+
+    @staticmethod
+    def _bounded_bonus(value: float, max_value: float) -> float:
+        """Clamp precomputed component scores into a safe scoring range."""
+
+        if value <= 0:
+            return 0.0
+        return min(float(value), max_value)

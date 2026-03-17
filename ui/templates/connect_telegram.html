@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connect Telegram</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .telegram-button {
+            background: linear-gradient(135deg, #0088cc 0%, #0077b5 100%);
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 8px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .telegram-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(0, 136, 204, 0.3);
+            color: white;
+            text-decoration: none;
+        }
+
+        .telegram-button:active {
+            transform: scale(0.98);
+        }
+
+        .success-check {
+            font-size: 48px;
+            color: #28a745;
+        }
+
+        .info-box {
+            background-color: #f8f9fa;
+            border-left: 4px solid #0088cc;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body class="bg-light">
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand fw-semibold" href="/dashboard">Freelance Agent</a>
+        <div class="d-flex align-items-center gap-3 text-white">
+            <div class="navbar-nav flex-row gap-2">
+                <a class="nav-link" href="/jobs">Jobs</a>
+                <a class="nav-link" href="/applications">Applications</a>
+                <a class="nav-link" href="/profile/">Profile</a>
+                <a class="nav-link" href="/upload-resume">Upload Resume</a>
+                <a class="nav-link active" href="/connect-telegram">Telegram</a>
+            </div>
+            <span class="small text-white-50">{{ request.user.username }}</span>
+            <form method="post" action="/logout/" class="m-0">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-light btn-sm">Logout</button>
+            </form>
+        </div>
+    </div>
+</nav>
+
+<div class="container py-4">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body p-4">
+            <h1 class="h3 mb-1">Connect Telegram</h1>
+            <p class="text-muted mb-4">Link your Telegram account to receive job notifications and alerts.</p>
+
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="info-box">
+                        <h5 class="mb-3">How it works:</h5>
+                        <ol class="mb-0">
+                            <li>Open the Telegram bot using one of the buttons on this page.</li>
+                            <li>Press <strong>Start</strong> or send any normal message to the bot.</li>
+                            <li>The bot will reply with a confirmation link.</li>
+                            <li>Open that confirmation link while logged in here.</li>
+                            <li>Your Telegram account will be linked immediately.</li>
+                        </ol>
+                    </div>
+
+                    <div class="mt-4">
+                        <h5 class="mb-3">Benefits:</h5>
+                        <ul class="mb-0">
+                            <li>✅ Real-time job notifications</li>
+                            <li>✅ Automatic job match alerts</li>
+                            <li>✅ Application status updates</li>
+                            <li>✅ Quick access to new opportunities</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <div class="text-center">
+                        {% if is_telegram_connected %}
+                        <div class="alert alert-success text-start" role="alert">
+                            <strong>Telegram already connected.</strong><br>
+                            Linked chat ID: <code>{{ linked_chat_id }}</code>
+                        </div>
+                        {% endif %}
+
+                        <div class="mb-4 p-4 bg-white rounded border">
+                            <p class="text-muted mb-4">Open the bot, press Start, then use the confirmation link the bot sends back.</p>
+                            <a href="{{ telegram_app_deep_link }}" class="telegram-button d-inline-block mb-2">
+                                Open In Telegram Desktop
+                            </a>
+                            <div>
+                                <a href="{{ telegram_deep_link }}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary btn-sm me-2">
+                                    Open Bot
+                                </a>
+                                <a href="{{ telegram_web_link }}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-secondary btn-sm">
+                                    Open In Telegram Web
+                                </a>
+                            </div>
+                            <p class="small text-muted mt-3">
+                                This opens a chat with <code>@{{ bot_username }}</code>. No token copy-paste is required anymore.
+                            </div>
+                        </div>
+
+                        <div class="alert alert-info" role="alert">
+                            <strong>Confirmation links expire in 10 minutes.</strong><br>
+                            If a link expires, return to the bot and press Start again to receive a fresh one.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4">
+                <a href="/profile/" class="btn btn-outline-secondary">Back to Profile</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

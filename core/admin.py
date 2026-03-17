@@ -9,7 +9,9 @@ from core.database.models import (
 	ResumeData,
 	Skill,
 	SystemLog,
+	TelegramVerification,
 	User,
+	UserProfile,
 )
 
 
@@ -68,6 +70,15 @@ class ApplicationAdmin(admin.ModelAdmin):
 	ordering = ("-applied_at",)
 
 
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+	"""Admin configuration for editable user technical profiles."""
+
+	list_display = ("user", "headline", "hourly_rate", "created_at")
+	search_fields = ("user__username", "user__email", "headline", "skills", "roles")
+	ordering = ("-created_at",)
+
+
 @admin.register(SystemLog)
 class SystemLogAdmin(admin.ModelAdmin):
 	"""Read-only admin configuration for centralized system logs."""
@@ -109,3 +120,21 @@ class SystemLogAdmin(admin.ModelAdmin):
 		"""Disable deletion from admin UI."""
 
 		return False
+
+
+@admin.register(TelegramVerification)
+class TelegramVerificationAdmin(admin.ModelAdmin):
+	"""Admin configuration for Telegram account verification tokens."""
+
+	list_display = ("user", "chat_id", "token", "is_used", "created_at")
+	list_filter = ("is_used", "created_at")
+	search_fields = ("user__username", "user__email", "token", "chat_id")
+	ordering = ("-created_at",)
+	readonly_fields = ("token", "chat_id", "created_at")
+
+	def get_readonly_fields(self, request, obj=None):
+		"""Make token read-only in both add and change views."""
+		readonly = list(self.readonly_fields)
+		if obj:  # Editing existing object
+			readonly = list(set(readonly + ["user"]))
+		return readonly

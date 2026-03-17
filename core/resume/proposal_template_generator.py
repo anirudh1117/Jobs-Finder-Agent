@@ -10,7 +10,7 @@ import openai
 from core.config.constants import DEFAULT_PROPOSAL_LENGTH
 from core.config.settings import OPENAI_API_KEY, OPENAI_MODEL_NAME
 from core.database.db_manager import DatabaseManager
-from core.database.models import ProposalTemplate, User
+from core.database.models import ProposalTemplate, User, UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,13 @@ how I can help.
 Best regards"""
 
 
-def build_proposal_prompt(summary: str, skills: List[str]) -> str:
+def build_proposal_prompt(
+    headline: str,
+    summary: str,
+    skills: List[str],
+    roles: List[str],
+    proposal_style_notes: str,
+) -> str:
     """Construct a structured four-section prompt for proposal template generation.
 
     The prompt is divided into four sections to give the model clear, separated
@@ -51,17 +57,28 @@ def build_proposal_prompt(summary: str, skills: List[str]) -> str:
     * **Section 4** states the final task with output requirements.
 
     Args:
+        headline: The user's editable professional headline.
         summary: The candidate's experience summary extracted from their resume.
         skills: A list of skill name strings to mention in the proposal.
+        roles: A list of preferred roles for positioning.
+        proposal_style_notes: Optional user-edited style preferences.
 
     Returns:
         A fully assembled prompt string ready to be sent to the OpenAI API.
     """
 
     skills_formatted = ", ".join(skills) if skills else "various technologies"
+    roles_formatted = ", ".join(roles) if roles else "Software Developer"
+    style_notes_text = proposal_style_notes.strip() if proposal_style_notes.strip() else "No extra style notes provided."
 
     return f"""\
 SECTION 1 — RESUME INFORMATION
+
+Headline:
+{headline}
+
+Preferred roles:
+{roles_formatted}
 
 Summary:
 {summary}
@@ -82,6 +99,7 @@ Follow these rules strictly when writing the proposal:
 - Keep the tone friendly and conversational.
 - Avoid robotic or overly polished sentences.
 - Output plain text only — no headings, no formatting marks.
+- Respect these additional style notes when useful: {style_notes_text}
 
 ---
 
@@ -159,9 +177,15 @@ class ProposalTemplateGenerator:
 
         user: User = User.objects.get(pk=user_id)
 
-        summary, skills_list = self._fetch_profile(user_id)
+        headline, summary, skills_list, roles, proposal_style_notes = self._fetch_profile(user_id)
 
-        template_text = self._call_openai(summary, skills_list)
+        template_text = self._call_openai(
+            headline,
+            summary,
+            skills_list,
+            roles,
+            proposal_style_notes,
+        )
 
         if not template_text.strip():
             raise ValueError(
@@ -185,14 +209,14 @@ class ProposalTemplateGenerator:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _fetch_profile(self, user_id: int) -> tuple[str, list[str]]:
-        """Retrieve the latest resume summary and skill names for a user.
+    def _fetch_profile(self, user_id: int) -> tuple[str, str, list[str], list[str], str]:
+        """Retrieve editable profile fields with fallback resume data for a user.
 
         Args:
             user_id: The primary key of the target User.
 
         Returns:
-            A 2-tuple of (summary string, list of skill name strings).
+            A 5-tuple of headline, summary, skills, roles, and style notes.
 
         Raises:
             ValueError: If no resume data has been stored for this user.
@@ -206,18 +230,33 @@ class ProposalTemplateGenerator:
             .first()
         )
 
-        if not latest_resume:
+        profile = UserProfile.objects.filter(user_id=user_id).order_by("-updated_at").first()
+
+        if not latest_resume and profile is None:
             raise ValueError(
                 f"No resume data found for user {user_id}. "
                 "Run skill extraction before generating a proposal template."
             )
 
         skills_qs = self._db.get_user_skills(user_id)
-        skill_names = list(skills_qs.values_list("skill_name", flat=True))
+        fallback_skill_names = list(skills_qs.values_list("skill_name", flat=True))
 
-        return latest_resume.summary, skill_names
+        headline = profile.headline if profile and profile.headline else ""
+        summary = profile.summary if profile and profile.summary else (latest_resume.summary if latest_resume else "")
+        skill_names = profile.skills if profile and profile.skills else fallback_skill_names
+        roles = profile.roles if profile and profile.roles else []
+        proposal_style_notes = profile.proposal_style_notes if profile and profile.proposal_style_notes else ""
 
-    def _call_openai(self, summary: str, skills: list[str]) -> str:
+        return headline, summary, skill_names, roles, proposal_style_notes
+
+    def _call_openai(
+        self,
+        headline: str,
+        summary: str,
+        skills: list[str],
+        roles: list[str],
+        proposal_style_notes: str,
+    ) -> str:
         """Build the structured prompt and send it to the OpenAI chat API.
 
         Uses ``build_proposal_prompt`` to assemble a four-section prompt that
@@ -226,14 +265,23 @@ class ProposalTemplateGenerator:
         by giving the model a concrete example to match in tone.
 
         Args:
+            headline: The user's editable headline.
             summary: The candidate's experience summary.
             skills: A list of skill name strings.
+            roles: Preferred roles from the editable profile.
+            proposal_style_notes: Optional user-edited style preferences.
 
         Returns:
             The raw proposal template text returned by the model.
         """
 
-        prompt = build_proposal_prompt(summary, skills)
+        prompt = build_proposal_prompt(
+            headline,
+            summary,
+            skills,
+            roles,
+            proposal_style_notes,
+        )
 
         response = self._client.chat.completions.create(
             model=OPENAI_MODEL_NAME,

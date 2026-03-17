@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from django.contrib.auth.models import User as AuthUser
 from django.db.models import QuerySet
+from django.utils import timezone
 
 from core.database.db_manager import DatabaseManager
-from core.database.models import Application, Job, User
+from core.database.models import Application, Job, User, UserJobMatch
 
 
 class ApplicationManager:
@@ -51,12 +53,14 @@ class ApplicationManager:
 
         user = User.objects.get(pk=user_id)
         job = Job.objects.get(pk=job_id)
-        return self._db.create_application(
+        application = self._db.create_application(
             user=user,
             job=job,
             proposal_text=proposal_text,
             status=status,
         )
+        self._mark_match_auto_applied(user_id=user_id, job=job, proposal_text=proposal_text)
+        return application
 
     def get_application_by_job(self, job_id: int) -> Application | None:
         """Return the most recent application associated with a job."""
@@ -84,3 +88,62 @@ class ApplicationManager:
         """
 
         return self._db.get_recent_applications(limit=limit)
+
+    def create_or_update_user_job_match(
+        self,
+        user_id: int,
+        job: Job,
+        match_score: int,
+        proposal_text: str | None = None,
+        application_status: str = UserJobMatch.ApplicationStatus.NOT_APPLIED,
+    ) -> UserJobMatch:
+        """Create or update a per-user match for a globally stored job."""
+
+        auth_user = AuthUser.objects.get(pk=user_id)
+        defaults = {
+            "match_score": match_score,
+            "proposal_text": proposal_text,
+            "application_status": application_status,
+        }
+        match, _ = UserJobMatch.objects.update_or_create(
+            user=auth_user,
+            job=job,
+            defaults=defaults,
+        )
+        return match
+
+    def get_user_job_matches(self, user_id: int) -> QuerySet[UserJobMatch]:
+        """Return all persisted matches for a user ordered by score descending."""
+
+        return UserJobMatch.objects.filter(user_id=user_id).select_related("job").order_by(
+            "-match_score",
+            "-created_at",
+        )
+
+    def mark_manual_apply_required(self, user_id: int, job_id: int) -> UserJobMatch | None:
+        """Mark an existing user-job match as requiring manual application."""
+
+        match = UserJobMatch.objects.filter(user_id=user_id, job_id=job_id).first()
+        if match is None:
+            return None
+        match.application_status = UserJobMatch.ApplicationStatus.MANUAL_APPLY_REQUIRED
+        match.save(update_fields=["application_status"])
+        return match
+
+    def _mark_match_auto_applied(self, user_id: int, job: Job, proposal_text: str) -> None:
+        """Mark the corresponding match as auto-applied after application creation."""
+
+        auth_user = AuthUser.objects.filter(pk=user_id).first()
+        if auth_user is None:
+            return
+
+        UserJobMatch.objects.update_or_create(
+            user=auth_user,
+            job=job,
+            defaults={
+                "match_score": 0,
+                "proposal_text": proposal_text,
+                "application_status": UserJobMatch.ApplicationStatus.AUTO_APPLIED,
+                "applied_at": timezone.now(),
+            },
+        )

@@ -3,9 +3,59 @@
 from __future__ import annotations
 
 import os
+from typing import Iterable
 
 from core.database.db_manager import DatabaseManager
 from core.database.models import User
+
+TARGET_ROLE_CHOICES: tuple[tuple[str, str], ...] = (
+    ("Software Engineer", "Software Engineer"),
+    ("Backend Engineer", "Backend Engineer"),
+    ("Backend Developer", "Backend Developer"),
+    ("Frontend Engineer", "Frontend Engineer"),
+    ("Frontend Developer", "Frontend Developer"),
+    ("Full Stack Engineer", "Full Stack Engineer"),
+    ("Full Stack Developer", "Full Stack Developer"),
+    ("Web Developer", "Web Developer"),
+    ("Mobile App Developer", "Mobile App Developer"),
+    ("Android Developer", "Android Developer"),
+    ("iOS Developer", "iOS Developer"),
+    ("Python Developer", "Python Developer"),
+    ("Java Developer", "Java Developer"),
+    ("JavaScript Developer", "JavaScript Developer"),
+    ("TypeScript Developer", "TypeScript Developer"),
+    ("React Developer", "React Developer"),
+    ("Angular Developer", "Angular Developer"),
+    ("Vue.js Developer", "Vue.js Developer"),
+    ("Node.js Developer", "Node.js Developer"),
+    ("Django Developer", "Django Developer"),
+    ("Flask Developer", "Flask Developer"),
+    ("API Developer", "API Developer"),
+    ("Database Developer", "Database Developer"),
+    ("SQL Developer", "SQL Developer"),
+    ("PostgreSQL Developer", "PostgreSQL Developer"),
+    ("Data Engineer", "Data Engineer"),
+    ("AI Engineer", "AI Engineer"),
+    ("Machine Learning Engineer", "Machine Learning Engineer"),
+    ("Data Scientist", "Data Scientist"),
+    ("Data Analyst", "Data Analyst"),
+    ("Business Analyst", "Business Analyst"),
+    ("Power BI Developer", "Power BI Developer"),
+    ("BI Developer", "BI Developer"),
+    ("Analytics Engineer", "Analytics Engineer"),
+    ("NLP Engineer", "NLP Engineer"),
+    ("MLOps Engineer", "MLOps Engineer"),
+    ("Cloud Engineer", "Cloud Engineer"),
+    ("DevOps Engineer", "DevOps Engineer"),
+    ("Site Reliability Engineer", "Site Reliability Engineer"),
+    ("Platform Engineer", "Platform Engineer"),
+    ("QA Engineer", "QA Engineer"),
+    ("Automation Test Engineer", "Automation Test Engineer"),
+    ("Cybersecurity Engineer", "Cybersecurity Engineer"),
+    ("Solutions Architect", "Solutions Architect"),
+)
+
+TARGET_ROLE_VALUES: set[str] = {value for value, _ in TARGET_ROLE_CHOICES}
 
 
 class ResumeUploader:
@@ -82,3 +132,28 @@ class ResumeUploader:
                 f"Supported formats: {', '.join(self.SUPPORTED_EXTENSIONS)}"
             )
         return True
+
+    @staticmethod
+    def validate_target_roles(target_roles: Iterable[str]) -> list[str]:
+        """Validate and normalize selected target roles.
+
+        Args:
+            target_roles: Roles submitted by the user.
+
+        Returns:
+            A deduplicated list of validated role names preserving order.
+
+        Raises:
+            ValueError: If any submitted role is not part of the allowed set.
+        """
+
+        normalized_roles: list[str] = []
+        for raw_role in target_roles:
+            role = str(raw_role).strip()
+            if not role:
+                continue
+            if role not in TARGET_ROLE_VALUES:
+                raise ValueError(f"Unsupported target role: {role}")
+            if role not in normalized_roles:
+                normalized_roles.append(role)
+        return normalized_roles
