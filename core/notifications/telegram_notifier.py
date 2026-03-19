@@ -203,6 +203,11 @@ class TelegramNotifier:
         message = f"<b>❗ Freelance Agent Error</b>\n\n<i>{escape(error_message)}</i>"
         return self.send_message(message, chat_id=chat_id)
 
+    def send_debug_report(self, report_message: str, chat_id: str | None = None) -> bool:
+        """Send a preformatted single-message debug summary to Telegram."""
+
+        return self.send_message(report_message, chat_id=chat_id)
+
     @staticmethod
     def _safe_attr(obj: Any, attr_name: str) -> str:
         """Safely get an attribute from an object and convert it to string."""

@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import traceback
 from typing import Dict, List
 
 from django.utils import timezone
 
 from core.applications.application_manager import ApplicationManager
-from core.config.constants import JOB_MATCH_THRESHOLD
 from core.config.settings import (
+    DEBUG_MODE,
     ENABLE_FREELANCER_FETCH,
     ENABLE_LINKEDIN_FETCH,
     ENABLE_MERCOR_FETCH,
     ENABLE_OUTLIER_FETCH,
     ENABLE_REMOTEOK_FETCH,
     ENABLE_REMOTIVE_FETCH,
+    SCORE_SCALE,
+    SCORE_THRESHOLD,
     ENABLE_UPWORK_FETCH,
     ENABLE_WEWORKREMOTELY_FETCH,
 )
@@ -32,13 +36,27 @@ from core.job_fetcher import (
     UpworkFetcher,
     WeWorkRemotelyFetcher,
 )
-from core.job_filter.job_classifier import JobClassifier
-from core.job_filter.job_scoring import JobScorer
-from core.job_filter.skill_matcher import SkillMatcher
+from core.job_filter.pipeline_debug import JobPreFilter, PipelineDebugReport
+from core.job_filter.user_job_relevance import UserJobRelevanceScorer
 from core.logging.system_logger import log_event
 from core.notifications.telegram_notifier import TelegramNotifier
 
 logger = logging.getLogger(__name__)
+
+_SUMMARY_EXPERIENCE_RE = re.compile(r"(\d{1,2})(?:\s*\+)?\s*(?:years|year|yrs|yr)", re.IGNORECASE)
+
+
+def _extract_experience_years_from_summary(summary: str) -> float:
+    """Extract best-effort years-of-experience signal from summary text."""
+
+    match = _SUMMARY_EXPERIENCE_RE.search(str(summary or ""))
+    if not match:
+        return 0.0
+
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return 0.0
 
 
 class JobPipeline:
@@ -53,14 +71,14 @@ class JobPipeline:
 
         self._db = db_manager or DatabaseManager()
 
-        self._skill_matcher = SkillMatcher(db_manager=self._db)
-        self._classifier = JobClassifier()
-        self._scorer = JobScorer()
-
         self._application_manager = ApplicationManager(db_manager=self._db)
         self._notifier = self._initialize_notifier()
+        self._debug_mode = DEBUG_MODE
+        self._score_scale = SCORE_SCALE
+        self._score_threshold = SCORE_THRESHOLD
 
         self._run_started_at = timezone.now()
+        self._run_report = self._new_debug_report()
         self._new_job_ids_from_check: list[int] = []
         self._fetched_jobs: List[Job] = []
         self._filtered_jobs: List[Job] = []
@@ -79,8 +97,11 @@ class JobPipeline:
 
         logger.info("Lightweight job check started")
 
+        self._run_report = self._new_debug_report()
+
         run_started_at = timezone.now()
         total_saved = 0
+        total_scraped = 0
 
         fetchers = []
         if ENABLE_UPWORK_FETCH:
@@ -111,6 +132,7 @@ class JobPipeline:
                     status="SUCCESS",
                 )
                 jobs = fetcher.fetch_jobs()
+                total_scraped += len(jobs)
                 saved_count = fetcher.save_jobs(jobs)
                 total_saved += saved_count
                 log_event(
@@ -135,6 +157,8 @@ class JobPipeline:
                     status="FAILED",
                     stack_trace=traceback.format_exc(),
                 )
+
+            self._run_report.record_scraped(total_scraped)
 
         discovered_jobs = list(
             Job.objects.filter(created_at__gte=run_started_at).order_by("-created_at")
@@ -178,6 +202,8 @@ class JobPipeline:
                 message=f"Pipeline skipped for user_id={user_id} because no new jobs were detected.",
                 status="SUCCESS",
             )
+            self._log_run_debug_summary(user_id=user_id)
+            self._notify_debug_summary()
             return
 
         self._reset_run_state(preserve_detected_jobs=True)
@@ -189,7 +215,6 @@ class JobPipeline:
             message=f"Pipeline started for user_id={user_id}",
             status="SUCCESS",
         )
-        self._notify_pipeline_started()
 
         try:
             self._run_stage("fetch_jobs", self.fetch_jobs)
@@ -199,7 +224,8 @@ class JobPipeline:
             self._notify_error(str(exc))
             raise
         finally:
-            self._notify_daily_summary()
+            self._log_run_debug_summary(user_id=user_id)
+            self._notify_debug_summary()
             # Consume lightweight-check discoveries so each batch is processed once.
             self._new_job_ids_from_check = []
 
@@ -235,6 +261,7 @@ class JobPipeline:
             "Stage fetch_jobs completed | fetched_jobs=%d",
             len(self._fetched_jobs),
         )
+        self._log_stage_metrics(stage_name="fetch_jobs")
 
     def match_jobs_for_users(self) -> None:
         """Score newly fetched jobs against each active user and create matches."""
@@ -259,51 +286,71 @@ class JobPipeline:
             len(active_user_ids),
             total_matches,
         )
+        self._log_stage_metrics(stage_name="match_jobs_for_users")
 
     def _match_jobs_for_user(self, user_id: int) -> int:
         """Create or update UserJobMatch records for a single user."""
 
-        user_skills = self._skill_matcher.get_user_skills(user_id)
-        user_roles = self._get_user_roles(user_id=user_id)
-        if not user_skills and not user_roles:
+        profile = UserProfile.objects.filter(user_id=user_id).order_by("-updated_at").first()
+        if profile is None:
+            logger.info("Skipping matching for user_id=%s with no profile", user_id)
+            return 0
+
+        user_profile = self._build_user_filter_profile(profile=profile)
+        if not user_profile["skills"] and not user_profile["preferred_roles"]:
             logger.info("Skipping matching for user_id=%s with no skills/roles", user_id)
             return 0
 
+        prefilter = JobPreFilter(user_profile=user_profile)
+        scorer = UserJobRelevanceScorer(
+            user_profile=user_profile,
+            scale=self._score_scale,
+            threshold=self._score_threshold,
+        )
+
         match_count = 0
         for job in self._fetched_jobs:
-            hourly_rate = float(job.hourly_rate or 0.0)
-            budget = float(job.budget or 0.0)
-            category = self._classifier.classify_job(
-                job_title=job.title,
-                job_description=job.description,
-                hourly_rate=hourly_rate,
+            job_input = self._build_job_filter_input(job=job)
+            passed_prefilter, prefilter_reason = prefilter.should_score(job_input)
+            self._run_report.record_prefilter(
+                passed=passed_prefilter,
+                reason=prefilter_reason,
             )
 
-            match_result = self._skill_matcher.match_job_skills(
-                job_title=job.title,
-                job_description=job.description,
-                user_skills=user_skills,
-            )
-            match_ratio = float(match_result.get("match_ratio", 0.0))
-            role_match_score = self._calculate_role_match_score(job=job, user_roles=user_roles)
-            keyword_relevance_score = self._calculate_keyword_relevance_score(
-                job=job,
-                user_skills=user_skills,
-                user_roles=user_roles,
-            )
-            experience_keyword_score = self._calculate_experience_keyword_score(job=job)
+            if not passed_prefilter and not self._debug_mode:
+                logger.info(
+                    "Job removed by prefilter | user_id=%s title=%s reason=%s",
+                    user_id,
+                    job.title,
+                    prefilter_reason,
+                )
+                continue
 
-            score = self._scorer.calculate_job_score(
-                skill_match_ratio=match_ratio,
-                role_match_score=role_match_score,
-                keyword_relevance_score=keyword_relevance_score,
-                experience_keyword_score=experience_keyword_score,
-                category=category,
-                budget=budget,
-                hourly_rate=hourly_rate,
+            result = scorer.evaluate(job_input)
+            score = float(result["score"])
+            passed_threshold = result["decision"] == "SAVE"
+
+            reasons: list[str] = []
+            if not passed_threshold:
+                reasons.append("low_score")
+            if result["missing_skills"]:
+                reasons.append("missing_skills")
+            if not passed_prefilter and prefilter_reason:
+                reasons.append(prefilter_reason)
+
+            should_save = self._debug_mode or passed_threshold
+
+            self._run_report.record_scored_job(
+                title=job.title,
+                score=score,
+                matched_skills=list(result["matched_skills"]),
+                missing_skills=list(result["missing_skills"]),
+                passed_threshold=passed_threshold,
+                saved=should_save,
+                reasons=reasons,
             )
 
-            if score > JOB_MATCH_THRESHOLD:
+            if should_save:
                 self._application_manager.create_or_update_user_job_match(
                     user_id=user_id,
                     job=job,
@@ -311,15 +358,38 @@ class JobPipeline:
                     application_status=UserJobMatch.ApplicationStatus.NOT_APPLIED,
                 )
                 match_count += 1
+                if self._debug_mode and not passed_threshold:
+                    logger.info(
+                        "Job saved because DEBUG_MODE is enabled | user_id=%s title=%s score=%.2f",
+                        user_id,
+                        job.title,
+                        score,
+                    )
             else:
-                logger.info("Job rejected due to low score | user_id=%s title=%s score=%.2f", user_id, job.title, score)
+                logger.info(
+                    "Job discarded by user relevance scorer | user_id=%s title=%s score=%.2f matched=%s missing=%s",
+                    user_id,
+                    job.title,
+                    score,
+                    result["matched_skills"],
+                    result["missing_skills"],
+                )
                 log_event(
                     level="INFO",
                     module="job_filter",
                     action="reject_job",
                     platform=job.platform,
                     job_url=job.job_url,
-                    message="Job rejected due to low score",
+                    message=(
+                        "Job discarded by deterministic relevance filter "
+                        f"(score={score:.2f}, matched={result['matched_skills']}, "
+                        f"missing={result['missing_skills']})"
+                    ),
+                    response_payload={
+                        "reasons": reasons,
+                        "threshold": self._score_threshold,
+                        "scale": self._score_scale,
+                    },
                     status="SUCCESS",
                 )
 
@@ -344,55 +414,70 @@ class JobPipeline:
         self._scored_jobs = []
         self._user_match_counts = {}
 
-    def _get_user_roles(self, user_id: int | None) -> list[str]:
-        """Return normalized role preferences for the target user when available."""
+    @staticmethod
+    def _build_user_filter_profile(profile: UserProfile) -> dict[str, object]:
+        """Build a scorer-friendly user profile dictionary."""
 
-        if user_id is None:
-            return []
-        profile = UserProfile.objects.filter(user_id=user_id).order_by("-updated_at").first()
-        if profile is None:
-            return []
-        return [str(role).strip().lower() for role in profile.roles if str(role).strip()]
+        return {
+            "skills": [str(skill).strip() for skill in (profile.skills or []) if str(skill).strip()],
+            "experience": _extract_experience_years_from_summary(profile.summary),
+            "preferred_roles": [str(role).strip() for role in (profile.roles or []) if str(role).strip()],
+            "location": "",
+        }
 
     @staticmethod
-    def _calculate_role_match_score(job: Job, user_roles: list[str]) -> float:
-        """Return a role-match component based on role keywords in job text."""
+    def _build_job_filter_input(job: Job) -> dict[str, object]:
+        """Build a scorer-friendly job dictionary from persisted Job rows."""
 
-        if not user_roles:
-            return 0.0
-        job_text = f"{job.title} {job.description}".lower()
-        matches = sum(1 for role in user_roles if role in job_text)
-        return min(float(matches), 2.0)
+        return {
+            "title": job.title,
+            "description": job.description,
+            "required_skills": list(job.skills or []),
+            "experience_required": None,
+            "location": "",
+        }
 
-    @staticmethod
-    def _calculate_keyword_relevance_score(
-        job: Job,
-        user_skills: list[str],
-        user_roles: list[str],
-    ) -> float:
-        """Return a keyword relevance component based on user/job overlap."""
+    def _new_debug_report(self) -> PipelineDebugReport:
+        """Create a fresh per-run debug report collector."""
 
-        relevant_keywords = list(user_skills) + list(user_roles)
-        job_text = f"{job.title} {job.description} {' '.join(job.skills or [])}".lower()
-        matches = sum(1 for keyword in relevant_keywords if keyword in job_text)
-        return min(matches / 2.0, 2.0)
+        return PipelineDebugReport(
+            scale=self._score_scale,
+            threshold=self._score_threshold,
+            debug_mode=self._debug_mode,
+            run_started_at=timezone.now(),
+        )
 
-    @staticmethod
-    def _calculate_experience_keyword_score(job: Job) -> float:
-        """Return an experience-signal component from common experience phrases."""
+    def _log_run_debug_summary(self, user_id: int) -> None:
+        """Emit structured run metrics for observability and debugging."""
 
-        experience_keywords = [
-            "senior",
-            "lead",
-            "expert",
-            "years of experience",
-            "production experience",
-            "architecture",
-            "scalable systems",
-        ]
-        job_text = f"{job.title} {job.description}".lower()
-        matches = sum(1 for keyword in experience_keywords if keyword in job_text)
-        return min(matches / 2.0, 2.0)
+        payload = self._run_report.to_payload()
+        payload["user_id"] = user_id
+        payload["matched_users"] = len(self._user_match_counts)
+        payload["total_user_matches"] = sum(self._user_match_counts.values())
+
+        logger.info("pipeline_run_debug %s", json.dumps(payload, sort_keys=True))
+        log_event(
+            level="INFO",
+            module="scheduler",
+            action="pipeline_debug_summary",
+            message="Pipeline debug summary recorded",
+            status="SUCCESS",
+            response_payload=payload,
+        )
+
+    def _log_stage_metrics(self, stage_name: str) -> None:
+        """Emit structured current stage counters for debugging."""
+
+        payload = {
+            "stage": stage_name,
+            "timestamp": timezone.now().isoformat(),
+            "total_jobs_scraped": self._run_report.total_jobs_scraped,
+            "jobs_after_prefilter": self._run_report.jobs_after_prefilter,
+            "jobs_scored": self._run_report.jobs_scored,
+            "jobs_above_threshold": self._run_report.jobs_above_threshold,
+            "jobs_saved": self._run_report.jobs_saved,
+        }
+        logger.info("pipeline_stage_metrics %s", json.dumps(payload, sort_keys=True))
 
     @staticmethod
     def _initialize_notifier() -> TelegramNotifier | None:
@@ -449,18 +534,13 @@ class JobPipeline:
         if sent:
             self._notified_manual_apply_ids.add(job.id)
 
-    def _notify_daily_summary(self) -> None:
-        """Send best-effort pipeline summary notification."""
+    def _notify_debug_summary(self) -> None:
+        """Send a single best-effort pipeline debug summary notification."""
 
-        total_matches = sum(self._user_match_counts.values())
+        report_message = self._run_report.build_telegram_message()
         self._send_notification(
-            lambda notifier: notifier.send_daily_summary(
-                jobs_scanned=len(self._fetched_jobs),
-                relevant_jobs=total_matches,
-                auto_applied=0,
-                manual_apply=0,
-            ),
-            "daily summary",
+            lambda notifier: notifier.send_debug_report(report_message),
+            "debug summary",
         )
 
     def _notify_error(self, error_message: str) -> None:

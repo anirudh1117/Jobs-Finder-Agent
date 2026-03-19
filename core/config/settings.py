@@ -36,6 +36,41 @@ def _get_env_bool(name: str, default: bool) -> bool:
     return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _get_env_int(name: str, default: int) -> int:
+    """Parse an integer environment variable with a safe fallback."""
+
+    raw_value = get_env_variable(name)
+    if raw_value is None:
+        return default
+
+    try:
+        return int(str(raw_value).strip())
+    except ValueError:
+        return default
+
+
+def _get_env_float(name: str, default: float) -> float:
+    """Parse a float environment variable with a safe fallback."""
+
+    raw_value = get_env_variable(name)
+    if raw_value is None:
+        return default
+
+    try:
+        return float(str(raw_value).strip())
+    except ValueError:
+        return default
+
+
+def _parse_score_scale(raw_value: Any) -> int:
+    """Parse supported score scale labels into integer scale values."""
+
+    normalized = str(raw_value or "1-10").strip().lower()
+    if normalized in {"1-5", "5", "scale5"}:
+        return 5
+    return 10
+
+
 OPENAI_MODEL_NAME: str = get_env_variable("OPENAI_MODEL_NAME", "gpt-4.1-mini")
 OPENAI_API_KEY: str | None = get_env_variable("OPENAI_API_KEY")
 
@@ -53,6 +88,13 @@ ENABLE_FREELANCER_FETCH: bool = _get_env_bool("ENABLE_FREELANCER_FETCH", True)
 
 ENABLE_JOB_FETCH_LOGGING: bool = _get_env_bool("ENABLE_JOB_FETCH_LOGGING", True)
 ENABLE_APPLICATION_LOGGING: bool = _get_env_bool("ENABLE_APPLICATION_LOGGING", True)
+SCORE_SCALE: int = _parse_score_scale(get_env_variable("SCORE_SCALE", "1-10"))
+SCORE_THRESHOLD: float = _get_env_float(
+    "SCORE_THRESHOLD",
+    3.0 if SCORE_SCALE == 5 else 6.0,
+)
+DEBUG_MODE: bool = _get_env_bool("DEBUG_MODE", False)
+JOB_SCORING_SCALE: int = _get_env_int("JOB_SCORING_SCALE", SCORE_SCALE)
 
 TELEGRAM_BOT_TOKEN: str | None = get_env_variable("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID: str | None = get_env_variable("TELEGRAM_CHAT_ID")
