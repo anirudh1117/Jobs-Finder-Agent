@@ -103,7 +103,7 @@ class TelegramNotifier:
             f"<b>Budget:</b> <code>{escape(self._format_budget(self._safe_attr(job, 'budget')))}</code>\n"
             f"<b>Score:</b> <b>{score:.2f}</b>\n\n"
             f"<b>Status:</b> <i>NOT APPLIED</i>\n\n"
-            f"<b>Job Link:</b> <a href=\"{self._safe_attr(job, 'job_url')}\">Open Job 🔗</a>"
+            f"<b>Job Link:</b>\n{self._safe_attr(job, 'job_url')}"
         )
         return self.send_message(message, chat_id=chat_id)
 
@@ -128,7 +128,7 @@ class TelegramNotifier:
             f"<b>Budget:</b> <code>{escape(self._format_budget(self._safe_attr(job, 'budget')))}</code>\n"
             f"<b>Score:</b> <b>{score:.2f}</b>\n\n"
             f"<b>Status:</b> <i>AUTO APPLIED</i>\n\n"
-            f"<b>Job Link:</b> <a href=\"{self._safe_attr(job, 'job_url')}\">Open Job 🔗</a>"
+            f"<b>Job Link:</b>\n{self._safe_attr(job, 'job_url')}"
         )
         return self.send_message(message, chat_id=chat_id)
 
@@ -153,7 +153,7 @@ class TelegramNotifier:
             f"<b>Budget:</b> <code>{escape(self._format_budget(self._safe_attr(job, 'budget')))}</code>\n"
             f"<b>Score:</b> <b>{score:.2f}</b>\n\n"
             f"<b>Status:</b> <i>MANUAL APPLY REQUIRED</i>\n\n"
-            f"<b>Job Link:</b> <a href=\"{self._safe_attr(job, 'job_url')}\">Open Job 🔗</a>"
+            f"<b>Job Link:</b>\n{self._safe_attr(job, 'job_url')}"
         )
         return self.send_message(message, chat_id=chat_id)
 

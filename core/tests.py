@@ -154,3 +154,4 @@ class PipelineDebugReportTests(SimpleTestCase):
 		self.assertIn("Data Analyst", message)
 		self.assertIn("https://example.com/backend-developer", message)
 		self.assertIn("score: 7.40", message)
+		self.assertNotIn("<a href=", message)

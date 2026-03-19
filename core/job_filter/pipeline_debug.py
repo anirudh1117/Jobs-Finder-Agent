@@ -255,7 +255,7 @@ class PipelineDebugReport:
             lines.append(f"{index}. <b>{escape(entry.title)}</b>")
             lines.append(f"   score: {entry.score:.2f}")
             if entry.job_url:
-                lines.append(f"   url: <a href=\"{escape(entry.job_url)}\">Open Job 🔗</a>")
+                lines.append(f"   url: {escape(entry.job_url)}")
             if include_reason:
                 reason = ", ".join(entry.reasons) if entry.reasons else "passed_threshold"
                 lines.append(f"   reason: {escape(reason)}")
