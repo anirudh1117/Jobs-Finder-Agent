@@ -20,6 +20,7 @@ class JobDebugEntry:
     """Compact per-job evaluation snapshot for debugging and reporting."""
 
     title: str
+    job_url: str
     score: float
     matched_skills: list[str]
     missing_skills: list[str]
@@ -107,6 +108,7 @@ class PipelineDebugReport:
         self,
         *,
         title: str,
+        job_url: str,
         score: float,
         matched_skills: list[str],
         missing_skills: list[str],
@@ -130,6 +132,7 @@ class PipelineDebugReport:
         self._entries.append(
             JobDebugEntry(
                 title=title,
+                job_url=str(job_url).strip(),
                 score=round(float(score), 2),
                 matched_skills=list(matched_skills),
                 missing_skills=list(missing_skills),
@@ -210,7 +213,7 @@ class PipelineDebugReport:
         else:
             lines.append("• None")
 
-        self._append_entry_section(lines, "Top Jobs", self.top_jobs(limit=5), include_skills=True)
+        self._append_entry_section(lines, "Top Jobs", self.top_jobs(limit=5))
         self._append_entry_section(lines, "Near Miss", self.near_miss(limit=3), include_reason=True)
         self._append_entry_section(lines, "Above Threshold Samples", self.above_threshold_samples(limit=3), include_reason=True)
 
@@ -241,7 +244,6 @@ class PipelineDebugReport:
         lines: list[str],
         heading: str,
         entries: list[JobDebugEntry],
-        include_skills: bool = False,
         include_reason: bool = False,
     ) -> None:
         lines.extend(["", f"<b>{escape(heading)}</b>"])
@@ -250,14 +252,10 @@ class PipelineDebugReport:
             return
 
         for index, entry in enumerate(entries, start=1):
-            lines.append(f"{index}. {escape(entry.title)} <b>({entry.score:.2f})</b>")
-            if include_skills:
-                lines.append(
-                    f"   matched: {escape(', '.join(entry.matched_skills) or 'none')}"
-                )
-                lines.append(
-                    f"   missing: {escape(', '.join(entry.missing_skills) or 'none')}"
-                )
+            lines.append(f"{index}. <b>{escape(entry.title)}</b>")
+            lines.append(f"   score: {entry.score:.2f}")
+            if entry.job_url:
+                lines.append(f"   url: <a href=\"{escape(entry.job_url)}\">Open Job 🔗</a>")
             if include_reason:
                 reason = ", ".join(entry.reasons) if entry.reasons else "passed_threshold"
                 lines.append(f"   reason: {escape(reason)}")
@@ -269,6 +267,7 @@ class PipelineDebugReport:
     def _entry_to_dict(entry: JobDebugEntry) -> dict[str, Any]:
         return {
             "title": entry.title,
+            "job_url": entry.job_url,
             "score": entry.score,
             "matched_skills": entry.matched_skills,
             "missing_skills": entry.missing_skills,

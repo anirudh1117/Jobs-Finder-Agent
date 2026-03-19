@@ -342,6 +342,7 @@ class JobPipeline:
 
             self._run_report.record_scored_job(
                 title=job.title,
+                job_url=job.job_url,
                 score=score,
                 matched_skills=list(result["matched_skills"]),
                 missing_skills=list(result["missing_skills"]),

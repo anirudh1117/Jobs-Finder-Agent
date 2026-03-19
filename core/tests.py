@@ -123,6 +123,7 @@ class PipelineDebugReportTests(SimpleTestCase):
 		report.record_prefilter(False, "prefilter_removed")
 		report.record_scored_job(
 			title="Backend Developer",
+			job_url="https://example.com/backend-developer",
 			score=7.4,
 			matched_skills=["python", "django"],
 			missing_skills=[],
@@ -132,6 +133,7 @@ class PipelineDebugReportTests(SimpleTestCase):
 		)
 		report.record_scored_job(
 			title="Data Analyst",
+			job_url="https://example.com/data-analyst",
 			score=5.9,
 			matched_skills=["sql"],
 			missing_skills=["python"],
@@ -150,3 +152,5 @@ class PipelineDebugReportTests(SimpleTestCase):
 		self.assertIn("Job Debug Report", message)
 		self.assertIn("Backend Developer", message)
 		self.assertIn("Data Analyst", message)
+		self.assertIn("https://example.com/backend-developer", message)
+		self.assertIn("score: 7.40", message)
