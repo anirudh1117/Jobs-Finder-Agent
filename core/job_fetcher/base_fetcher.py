@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, List
 
 from core.database.db_manager import DatabaseManager
+from core.utils.url_utils import clean_url, normalize_url
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,12 @@ class BaseJobFetcher(ABC):
         """
 
         title = str(raw_job.get("title", "")).strip()
-        job_url = str(raw_job.get("job_url", "")).strip()
+        job_url = clean_url(
+            normalize_url(
+                str(raw_job.get("job_url", "")).strip(),
+                base_url=str(raw_job.get("base_url", "")).strip() or None,
+            )
+        )
 
         if not title:
             raise ValueError("Cannot normalize job without a title.")

@@ -41,3 +41,32 @@ def log_event(
     except Exception:
         # Intentionally silent to keep logging non-blocking.
         pass
+
+
+def log_url_event(
+    *,
+    module: str,
+    action: str,
+    message: str,
+    status: str,
+    job_url: str | None = None,
+    platform: str | None = None,
+    level: str = "INFO",
+    response_payload: dict[str, Any] | None = None,
+) -> None:
+    """Persist URL normalization/validation events safely.
+
+    This helper keeps URL-related telemetry consistent across fetchers and pipeline
+    while preserving the non-blocking logging behavior of ``log_event``.
+    """
+
+    log_event(
+        level=level,
+        module=module,
+        action=action,
+        message=message,
+        status=status,
+        platform=platform,
+        job_url=job_url,
+        response_payload=response_payload,
+    )

@@ -13,6 +13,7 @@ from core.config.constants import (
     CATEGORY_OTHER,
     CATEGORY_SOFTWARE_DEV,
     LINKEDIN,
+    NAUKRI,
     MERCOR,
     OUTLIER,
     REMOTEOK,
@@ -111,6 +112,7 @@ class Job(models.Model):
         OUTLIER = OUTLIER, "Outlier"
         REMOTEOK = REMOTEOK, "RemoteOK"
         LINKEDIN = LINKEDIN, "LinkedIn"
+        NAUKRI = NAUKRI, "Naukri"
 
     class Category(models.TextChoices):
         """Supported normalized job categories."""
@@ -131,7 +133,7 @@ class Job(models.Model):
     company = models.CharField(max_length=255, blank=True, default="")
     description = models.TextField()
     platform = models.CharField(max_length=50, choices=Platform.choices)
-    job_url = models.URLField(max_length=1000)
+    job_url = models.URLField(max_length=1000, unique=True)
     budget = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     job_type = models.CharField(
         max_length=32,
@@ -148,9 +150,6 @@ class Job(models.Model):
         indexes = [
             models.Index(fields=["job_url"], name="core_job_url_idx"),
             models.Index(fields=["platform"], name="core_job_platform_idx"),
-        ]
-        constraints = [
-            models.UniqueConstraint(fields=["job_url"], name="core_unique_job_url"),
         ]
         ordering = ["-created_at"]
 

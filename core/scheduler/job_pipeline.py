@@ -14,6 +14,7 @@ from core.applications.application_manager import ApplicationManager
 from core.config.settings import (
     DEBUG_MODE,
     ENABLE_FREELANCER_FETCH,
+    ENABLE_GOOGLE_JOBS_FETCH,
     ENABLE_LINKEDIN_FETCH,
     ENABLE_MERCOR_FETCH,
     ENABLE_OUTLIER_FETCH,
@@ -28,6 +29,7 @@ from core.database.db_manager import DatabaseManager
 from core.database.models import Job, UserJobMatch, UserProfile
 from core.job_fetcher import (
     FreelancerFetcher,
+    GoogleJobsFetcher,
     LinkedInFetcher,
     MercorFetcher,
     OutlierFetcher,
@@ -40,6 +42,7 @@ from core.job_filter.pipeline_debug import JobPreFilter, PipelineDebugReport
 from core.job_filter.user_job_relevance import UserJobRelevanceScorer
 from core.logging.system_logger import log_event
 from core.notifications.telegram_notifier import TelegramNotifier
+from core.utils.url_utils import clean_url, is_valid_url, normalize_url
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +107,8 @@ class JobPipeline:
         total_scraped = 0
 
         fetchers = []
+        if ENABLE_GOOGLE_JOBS_FETCH:
+            fetchers.append(GoogleJobsFetcher(db_manager=self._db))
         if ENABLE_UPWORK_FETCH:
             fetchers.append(UpworkFetcher(db_manager=self._db))
         if ENABLE_MERCOR_FETCH:
@@ -112,7 +117,7 @@ class JobPipeline:
             fetchers.append(OutlierFetcher(db_manager=self._db))
         if ENABLE_REMOTEOK_FETCH:
             fetchers.append(RemoteOKFetcher(db_manager=self._db))
-        if ENABLE_LINKEDIN_FETCH:
+        if ENABLE_LINKEDIN_FETCH and not ENABLE_GOOGLE_JOBS_FETCH:
             fetchers.append(LinkedInFetcher(db_manager=self._db))
         if ENABLE_REMOTIVE_FETCH:
             fetchers.append(RemotiveFetcher(db_manager=self._db))
@@ -133,7 +138,8 @@ class JobPipeline:
                 )
                 jobs = fetcher.fetch_jobs()
                 total_scraped += len(jobs)
-                saved_count = fetcher.save_jobs(jobs)
+                valid_jobs = self._validate_jobs_before_persist(jobs=jobs, platform=fetcher.platform)
+                saved_count = fetcher.save_jobs(valid_jobs)
                 total_saved += saved_count
                 log_event(
                     level="INFO",
@@ -253,9 +259,39 @@ class JobPipeline:
 
         logger.info("Stage fetch_jobs started")
 
-        self._fetched_jobs = list(
+        staged_jobs = list(
             Job.objects.filter(id__in=self._new_job_ids_from_check).order_by("-created_at")
         )
+
+        self._fetched_jobs = []
+        for job in staged_jobs:
+            normalized_url = clean_url(normalize_url(job.job_url))
+            if not normalized_url or not is_valid_url(normalized_url):
+                log_event(
+                    level="ERROR",
+                    module="scheduler",
+                    action="invalid_url",
+                    platform=job.platform,
+                    job_url=job.job_url,
+                    message="Skipping invalid URL while loading staged jobs",
+                    status="FAILED",
+                )
+                continue
+
+            if normalized_url != job.job_url:
+                Job.objects.filter(pk=job.pk).update(job_url=normalized_url)
+                job.job_url = normalized_url
+                log_event(
+                    level="INFO",
+                    module="scheduler",
+                    action="url_normalized",
+                    platform=job.platform,
+                    job_url=normalized_url,
+                    message="Normalized staged job URL",
+                    status="SUCCESS",
+                )
+
+            self._fetched_jobs.append(job)
 
         logger.info(
             "Stage fetch_jobs completed | fetched_jobs=%d",
@@ -566,3 +602,72 @@ class JobPipeline:
         except Exception:  # noqa: BLE001
             logger.exception("Failed to send Telegram notification for %s", label)
             return False
+
+    def _validate_jobs_before_persist(
+        self,
+        *,
+        jobs: list[dict[str, object]],
+        platform: str,
+    ) -> list[dict[str, object]]:
+        """Normalize and validate URLs before persistence to prevent broken links."""
+
+        valid_jobs: list[dict[str, object]] = []
+        invalid_count = 0
+
+        for job in jobs:
+            original_url = str(job.get("job_url") or "").strip()
+            normalized_url = clean_url(normalize_url(original_url))
+            if not normalized_url:
+                invalid_count += 1
+                log_event(
+                    level="ERROR",
+                    module="job_fetcher",
+                    action="invalid_url",
+                    platform=platform,
+                    job_url=original_url,
+                    message="URL normalization failed",
+                    status="FAILED",
+                )
+                continue
+
+            if normalized_url != original_url:
+                log_event(
+                    level="INFO",
+                    module="job_fetcher",
+                    action="url_normalized",
+                    platform=platform,
+                    job_url=normalized_url,
+                    message="URL normalized before persistence",
+                    status="SUCCESS",
+                    response_payload={"original": original_url, "normalized": normalized_url},
+                )
+
+            if not is_valid_url(normalized_url):
+                invalid_count += 1
+                log_event(
+                    level="ERROR",
+                    module="job_fetcher",
+                    action="invalid_url",
+                    platform=platform,
+                    job_url=normalized_url,
+                    message="URL not reachable",
+                    status="FAILED",
+                )
+                continue
+
+            validated_job = dict(job)
+            validated_job["job_url"] = normalized_url
+            valid_jobs.append(validated_job)
+
+        if invalid_count:
+            log_event(
+                level="INFO",
+                module="job_fetcher",
+                action="invalid_urls_skipped",
+                platform=platform,
+                message=f"Skipped {invalid_count} invalid URLs before persistence",
+                status="SUCCESS",
+                response_payload={"invalid_urls_skipped": invalid_count},
+            )
+
+        return valid_jobs

@@ -60,6 +60,7 @@ class RemoteOKFetcher(BaseJobFetcher):
                 "title": title,
                 "description": str(item.get("description") or "").strip(),
                 "job_url": url,
+                "base_url": "https://remoteok.com",
                 "budget": _extract_salary_budget(item),
                 "hourly_rate": _extract_hourly_rate(item),
                 "platform": self.platform,

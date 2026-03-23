@@ -45,6 +45,7 @@ class OutlierFetcher(BaseJobFetcher):
                 "title": raw.get("title") or raw.get("name") or "",
                 "description": raw.get("description") or raw.get("summary") or "",
                 "job_url": raw.get("url") or raw.get("job_url") or "",
+                "base_url": "https://outlier.ai",
                 "budget": 0.0,
                 "hourly_rate": _extract_hourly_rate(raw),
                 "platform": self.platform,

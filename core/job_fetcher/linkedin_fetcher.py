@@ -52,6 +52,7 @@ class LinkedInFetcher(BaseJobFetcher):
                 "title": raw.get("title", ""),
                 "description": raw.get("description", ""),
                 "job_url": raw.get("job_url", ""),
+                "base_url": "https://www.linkedin.com",
                 "budget": 0.0,
                 "hourly_rate": 0.0,
                 "platform": self.platform,

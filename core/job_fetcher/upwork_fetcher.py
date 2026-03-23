@@ -50,6 +50,7 @@ class UpworkFetcher(BaseJobFetcher):
                 "title": _xml_text(item, "title"),
                 "description": _xml_text(item, "description"),
                 "job_url": _xml_text(item, "link"),
+                "base_url": "https://www.upwork.com",
                 "budget": _extract_budget(_xml_text(item, "description")),
                 "hourly_rate": 0.0,
                 "platform": self.platform,

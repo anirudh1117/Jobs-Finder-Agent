@@ -1,7 +1,9 @@
 from django.test import SimpleTestCase
+from unittest.mock import Mock, patch
 
 from core.job_filter.pipeline_debug import JobPreFilter, PipelineDebugReport
 from core.job_filter.user_job_relevance import UserJobRelevanceScorer
+from core.utils.url_utils import clean_url, extract_platform, is_valid_url, normalize_url
 
 
 class UserJobRelevanceScorerTests(SimpleTestCase):
@@ -155,3 +157,26 @@ class PipelineDebugReportTests(SimpleTestCase):
 		self.assertIn("https://example.com/backend-developer", message)
 		self.assertIn("score: 7.40", message)
 		self.assertNotIn("<a href=", message)
+
+
+class URLUtilsTests(SimpleTestCase):
+	def test_normalize_url_resolves_relative_and_trims(self) -> None:
+		url = normalize_url(" /jobs/view/12345/ ", base_url="https://www.linkedin.com")
+		self.assertEqual(url, "https://www.linkedin.com/jobs/view/12345")
+
+	def test_clean_url_removes_query_and_fragment(self) -> None:
+		url = clean_url("https://www.naukri.com/job/123?utm_source=test&ref=abc#overview")
+		self.assertEqual(url, "https://www.naukri.com/job/123")
+
+	def test_extract_platform(self) -> None:
+		self.assertEqual(extract_platform("https://www.linkedin.com/jobs/view/1"), "LINKEDIN")
+		self.assertEqual(extract_platform("https://www.naukri.com/job-listings-1"), "NAUKRI")
+		self.assertEqual(extract_platform("https://example.com/job"), "UNKNOWN")
+
+	@patch("core.utils.url_utils.requests.head")
+	def test_is_valid_url_true_only_for_200(self, mock_head: Mock) -> None:
+		mock_head.return_value = Mock(status_code=200)
+		self.assertTrue(is_valid_url("https://example.com/job"))
+
+		mock_head.return_value = Mock(status_code=404)
+		self.assertFalse(is_valid_url("https://example.com/missing"))
