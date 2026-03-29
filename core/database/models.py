@@ -297,3 +297,22 @@ class TelegramVerification(models.Model):
     def __str__(self) -> str:
         owner = self.user.username if self.user else "unassigned"
         return f"TelegramVerification<{owner}, chat_id={self.chat_id or 'unknown'}, used={self.is_used}>"
+
+
+class SerpAPIUsage(models.Model):
+    """Tracks SerpAPI usage count per day for quota enforcement."""
+
+    id = models.AutoField(primary_key=True)
+    date = models.DateField(unique=True)
+    month = models.CharField(max_length=7, db_index=True)  # YYYY-MM
+    request_count = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ["-date"]
+        indexes = [
+            models.Index(fields=["date"], name="core_serpapi_date_idx"),
+            models.Index(fields=["month"], name="core_serpapi_month_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"SerpAPIUsage<{self.date} requests={self.request_count}>"

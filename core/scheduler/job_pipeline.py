@@ -22,6 +22,7 @@ from core.config.settings import (
     ENABLE_REMOTIVE_FETCH,
     SCORE_SCALE,
     SCORE_THRESHOLD,
+    SERPAPI_API_KEY,
     ENABLE_UPWORK_FETCH,
     ENABLE_WEWORKREMOTELY_FETCH,
 )
@@ -42,6 +43,7 @@ from core.job_filter.pipeline_debug import JobPreFilter, PipelineDebugReport
 from core.job_filter.user_job_relevance import UserJobRelevanceScorer
 from core.logging.system_logger import log_event
 from core.notifications.telegram_notifier import TelegramNotifier
+from core.utils.serpapi_manager import SerpAPIManager
 from core.utils.url_utils import clean_url, is_valid_url, normalize_url
 
 logger = logging.getLogger(__name__)
@@ -108,7 +110,24 @@ class JobPipeline:
 
         fetchers = []
         if ENABLE_GOOGLE_JOBS_FETCH:
-            fetchers.append(GoogleJobsFetcher(db_manager=self._db))
+            should_add_google = True
+            if SERPAPI_API_KEY:
+                serpapi_manager = SerpAPIManager()
+                if not serpapi_manager.can_make_request():
+                    should_add_google = False
+                    quota = serpapi_manager.get_remaining_quota()
+                    log_event(
+                        level="WARNING",
+                        module="serpapi",
+                        action="quota_exceeded",
+                        platform="google",
+                        message="Skipping GoogleJobsFetcher because SerpAPI quota is exhausted",
+                        status="FAILED",
+                        response_payload=quota,
+                    )
+
+            if should_add_google:
+                fetchers.append(GoogleJobsFetcher(db_manager=self._db))
         if ENABLE_UPWORK_FETCH:
             fetchers.append(UpworkFetcher(db_manager=self._db))
         if ENABLE_MERCOR_FETCH:

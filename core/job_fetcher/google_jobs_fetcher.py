@@ -14,6 +14,7 @@ from core.config.constants import GOOGLE, LINKEDIN, NAUKRI
 from core.config.settings import GOOGLE_CSE_API_KEY, GOOGLE_CSE_ID, SERPAPI_API_KEY
 from core.job_fetcher.base_fetcher import BaseJobFetcher
 from core.logging.system_logger import log_event, log_url_event
+from core.utils.serpapi_manager import SerpAPIManager
 from core.utils.url_utils import clean_url, extract_platform, normalize_url
 
 logger = logging.getLogger(__name__)
@@ -46,8 +47,23 @@ class GoogleJobsFetcher(BaseJobFetcher):
             status="SUCCESS",
         )
 
+        quota_manager = SerpAPIManager()
+
         if SERPAPI_API_KEY:
-            search_results = self._search_via_serpapi()
+            if not quota_manager.can_make_request():
+                quota = quota_manager.get_remaining_quota()
+                log_event(
+                    level="WARNING",
+                    module="serpapi",
+                    action="quota_exceeded",
+                    platform=self.platform,
+                    message="SerpAPI quota exceeded, skipping fetch",
+                    status="FAILED",
+                    response_payload=quota,
+                )
+                return []
+
+            search_results = self._search_via_serpapi(manager=quota_manager)
         elif GOOGLE_CSE_API_KEY and GOOGLE_CSE_ID:
             search_results = self._search_via_cse()
         else:
@@ -109,9 +125,35 @@ class GoogleJobsFetcher(BaseJobFetcher):
         )
         return normalized_jobs
 
-    def _search_via_serpapi(self) -> list[dict[str, str]]:
+    def _search_via_serpapi(self, manager: SerpAPIManager) -> list[dict[str, str]]:
         results: list[dict[str, str]] = []
         for query in _SEARCH_QUERIES:
+            cached = manager.get_cached_results(query)
+            if cached is not None:
+                log_event(
+                    level="INFO",
+                    module="serpapi",
+                    action="cache_hit",
+                    platform=self.platform,
+                    message=f"Using cached SerpAPI results for query='{query}'",
+                    status="SUCCESS",
+                )
+                results.extend(cached)
+                continue
+
+            if not manager.can_make_request():
+                remaining = manager.get_remaining_quota()
+                log_event(
+                    level="WARNING",
+                    module="serpapi",
+                    action="quota_exceeded",
+                    platform=self.platform,
+                    message="SerpAPI quota exceeded during query loop",
+                    status="FAILED",
+                    response_payload={"query": query, **remaining},
+                )
+                break
+
             params = {
                 "engine": "google",
                 "q": query,
@@ -124,18 +166,46 @@ class GoogleJobsFetcher(BaseJobFetcher):
                 payload = response.json()
             except (requests.RequestException, ValueError):
                 logger.exception("SerpAPI request failed for query=%s", query)
+                log_event(
+                    level="ERROR",
+                    module="serpapi",
+                    action="request_failed",
+                    platform=self.platform,
+                    message=f"SerpAPI request failed for query='{query}'",
+                    status="FAILED",
+                )
                 continue
 
+            manager.record_request()
+            remaining = manager.get_remaining_quota()
+            log_event(
+                level="INFO",
+                module="serpapi",
+                action="request_made",
+                platform=self.platform,
+                message=(
+                    "SerpAPI request made. "
+                    f"Remaining daily: {remaining['daily_remaining']}, "
+                    f"monthly: {remaining['monthly_remaining']}"
+                ),
+                status="SUCCESS",
+                response_payload={"query": query, **remaining},
+            )
+
+            query_results: list[dict[str, str]] = []
             for item in payload.get("organic_results", []) or []:
                 if not isinstance(item, dict):
                     continue
-                results.append(
+                query_results.append(
                     {
                         "title": str(item.get("title") or "").strip(),
                         "job_url": str(item.get("link") or "").strip(),
                         "description": str(item.get("snippet") or "").strip(),
                     }
                 )
+
+            manager.cache_results(query, query_results)
+            results.extend(query_results)
         return results
 
     def _search_via_cse(self) -> list[dict[str, str]]:

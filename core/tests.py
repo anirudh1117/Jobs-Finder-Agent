@@ -1,8 +1,12 @@
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 from unittest.mock import Mock, patch
 
+from core.config.constants import SERPAPI_DAILY_LIMIT, SERPAPI_MONTHLY_LIMIT
+from core.database.models import SerpAPIUsage
 from core.job_filter.pipeline_debug import JobPreFilter, PipelineDebugReport
 from core.job_filter.user_job_relevance import UserJobRelevanceScorer
+from core.utils.serpapi_manager import SerpAPIManager
 from core.utils.url_utils import clean_url, extract_platform, is_valid_url, normalize_url
 
 
@@ -180,3 +184,33 @@ class URLUtilsTests(SimpleTestCase):
 
 		mock_head.return_value = Mock(status_code=404)
 		self.assertFalse(is_valid_url("https://example.com/missing"))
+
+
+class SerpAPIManagerTests(TestCase):
+	def test_record_request_increments_today_usage(self) -> None:
+		manager = SerpAPIManager()
+		self.assertTrue(manager.can_make_request())
+
+		manager.record_request()
+
+		usage = SerpAPIUsage.objects.get(date__isnull=False)
+		self.assertEqual(usage.request_count, 1)
+
+	def test_daily_limit_blocks_requests(self) -> None:
+		manager = SerpAPIManager()
+		for _ in range(SERPAPI_DAILY_LIMIT):
+			manager.record_request()
+
+		self.assertFalse(manager.can_make_request())
+		remaining = manager.get_remaining_quota()
+		self.assertEqual(remaining["daily_remaining"], 0)
+
+	def test_monthly_limit_blocks_requests(self) -> None:
+		today = timezone.localdate()
+		month_key = today.strftime("%Y-%m")
+		SerpAPIUsage.objects.create(date=today, month=month_key, request_count=SERPAPI_MONTHLY_LIMIT)
+
+		manager = SerpAPIManager()
+		self.assertFalse(manager.can_make_request())
+		remaining = manager.get_remaining_quota()
+		self.assertEqual(remaining["monthly_remaining"], 0)

@@ -70,3 +70,23 @@ def log_url_event(
         job_url=job_url,
         response_payload=response_payload,
     )
+
+
+def log_serpapi_event(
+    *,
+    action: str,
+    message: str,
+    status: str,
+    level: str = "INFO",
+    response_payload: dict[str, Any] | None = None,
+) -> None:
+    """Persist SerpAPI quota/request telemetry events safely."""
+
+    log_event(
+        level=level,
+        module="serpapi",
+        action=action,
+        message=message,
+        status=status,
+        response_payload=response_payload,
+    )
